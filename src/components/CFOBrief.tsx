@@ -17,6 +17,7 @@ import {
   formatRunwayMonths,
   formatVarianceLabel,
 } from "@/lib/formatting";
+import { generateMonthlyCfoDeck } from "@/lib/powerpoint";
 
 type Highlight = {
   label: string;
@@ -49,11 +50,30 @@ export function CFOBrief() {
     sampleFinancials[sampleFinancials.length - 1].month,
   );
   const [generatedMonth, setGeneratedMonth] = useState(selectedMonth);
+  const [deckMessage, setDeckMessage] = useState("");
+  const [isGeneratingDeck, setIsGeneratingDeck] = useState(false);
 
   const brief = useMemo(
     () => buildBriefForMonth(generatedMonth),
     [generatedMonth],
   );
+
+  async function handleDeckGeneration() {
+    setIsGeneratingDeck(true);
+    setDeckMessage("Generating PowerPoint deck from local sample data...");
+
+    try {
+      const fileName = await generateMonthlyCfoDeck({
+        reportingMonth: generatedMonth,
+        brief,
+      });
+      setDeckMessage(`${fileName} was generated and sent to your browser downloads.`);
+    } catch {
+      setDeckMessage("Deck generation failed. Please try again from the local app.");
+    } finally {
+      setIsGeneratingDeck(false);
+    }
+  }
 
   return (
     <section className="space-y-8">
@@ -94,8 +114,56 @@ export function CFOBrief() {
           >
             Generate CFO Brief
           </button>
+          <button
+            type="button"
+            onClick={handleDeckGeneration}
+            disabled={isGeneratingDeck}
+            className="h-10 rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-400"
+          >
+            Generate Monthly CFO Deck
+          </button>
         </div>
       </div>
+
+      {deckMessage ? (
+        <div className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
+          {deckMessage}
+        </div>
+      ) : null}
+
+      <section className="rounded-md border border-neutral-200 bg-white p-5">
+        <h2 className="text-base font-semibold">Monthly CFO Brief</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
+          Generate an investor-ready monthly CFO deck from the local dashboard,
+          budget vs actuals, forecast, and rule-based CFO commentary.
+        </p>
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {[
+            "Title Slide",
+            "Executive Summary",
+            "Key Financial Metrics",
+            "Revenue Performance",
+            "Expense Performance",
+            "Budget vs Actuals",
+            "Cash & Runway",
+            "Forecast Update",
+            "Key Risks",
+            "Recommended Actions",
+            "Investor Update Bullets",
+            "Appendix",
+          ].map((slideName, index) => (
+            <div
+              key={slideName}
+              className="rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
+            >
+              <span className="font-medium text-neutral-950">
+                Slide {index + 1}:
+              </span>{" "}
+              {slideName}
+            </div>
+          ))}
+        </div>
+      </section>
 
       <BriefSection title="Executive Summary" items={brief.executiveSummary} />
 
