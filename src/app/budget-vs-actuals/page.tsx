@@ -2,8 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
-import { sampleBudget } from "@/data/sampleBudget";
-import { sampleFinancials } from "@/data/sampleFinancials";
 import {
   aggregateFinancialPeriods,
   calculateMonthlyVariance,
@@ -19,6 +17,12 @@ import {
   formatRunwayMonths,
   formatVarianceLabel,
 } from "@/lib/formatting";
+import {
+  getActiveFinancialData,
+  getBudgetForMonth,
+  getDataSourceLabel,
+  type ActiveFinancialData,
+} from "@/lib/localDataStore";
 
 type ViewMode = "monthly" | "quarterly" | "ytd";
 type MetricFormat = "currency" | "percent" | "months";
@@ -134,22 +138,29 @@ const metrics: MetricDefinition[] = [
 ];
 
 export default function BudgetVsActualsPage() {
+  const [activeData] = useState<ActiveFinancialData>(() =>
+    getActiveFinancialData(),
+  );
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [selectedMonth, setSelectedMonth] = useState(
-    sampleFinancials[sampleFinancials.length - 1].month,
+    activeData.periods[activeData.periods.length - 1].month,
   );
 
-  const selectedIndex = sampleFinancials.findIndex(
+  const activeFinancials = activeData.periods;
+  const selectedIndex = activeFinancials.findIndex(
     (period) => period.month === selectedMonth,
   );
 
   const actualPeriods = useMemo(
-    () => selectPeriods(viewMode, selectedIndex, sampleFinancials),
-    [selectedIndex, viewMode],
+    () => selectPeriods(viewMode, selectedIndex, activeFinancials),
+    [activeFinancials, selectedIndex, viewMode],
   );
   const budgetPeriods = useMemo(
-    () => selectPeriods(viewMode, selectedIndex, sampleBudget),
-    [selectedIndex, viewMode],
+    () =>
+      actualPeriods.map((period, index) =>
+        getBudgetForMonth(period.month, Math.max(0, selectedIndex - actualPeriods.length + index + 1)),
+      ),
+    [actualPeriods, selectedIndex],
   );
 
   const actual = aggregateFinancialPeriods(actualPeriods);
@@ -187,8 +198,8 @@ export default function BudgetVsActualsPage() {
   });
 
   const topUnfavorable = getTopUnfavorableVariances(rows, 5);
-  const chartData = sampleFinancials.map((actualMonth, index) => {
-    const budgetMonth = sampleBudget[index];
+  const chartData = activeFinancials.map((actualMonth, index) => {
+    const budgetMonth = getBudgetForMonth(actualMonth.month, index);
 
     return {
       month: shortMonth(actualMonth.month),
@@ -214,9 +225,19 @@ export default function BudgetVsActualsPage() {
             Financial Variance Review
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-neutral-600">
-            Compare local sample actuals against budget by month, quarter, and
+            Compare active actuals against budget by month, quarter, and
             year-to-date.
           </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <DataSourceBadge label={getDataSourceLabel(activeData.dataSource)} />
+            {activeData.dataSource === "uploaded" ? (
+              <p className="text-sm text-neutral-500">
+                Uploaded CSV data is stored locally in your browser for
+                prototype testing only. Cash and runway still use sample
+                assumptions.
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -244,7 +265,7 @@ export default function BudgetVsActualsPage() {
               onChange={(event) => setSelectedMonth(event.target.value)}
               className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-950"
             >
-              {sampleFinancials.map((period) => (
+              {activeFinancials.map((period) => (
                 <option key={period.month} value={period.month}>
                   {period.month}
                 </option>
@@ -268,6 +289,19 @@ export default function BudgetVsActualsPage() {
           )}
         />
       </div>
+
+      {activeData.warnings.length > 0 ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5">
+          <h2 className="text-base font-semibold">Data Assumptions</h2>
+          <ul className="mt-3 space-y-2 text-sm leading-6 text-neutral-700">
+            {activeData.warnings.map((warning) => (
+              <li key={warning} className="ml-4 list-disc">
+                {warning}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <BudgetVsActualsTable rows={rows} />
 
@@ -441,22 +475,32 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function DataSourceBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+      {label}
+    </span>
+  );
+}
+
 function selectPeriods<T>(
   viewMode: ViewMode,
   selectedIndex: number,
   periods: T[],
 ) {
+  const safeIndex = selectedIndex >= 0 ? selectedIndex : periods.length - 1;
+
   if (viewMode === "monthly") {
-    return [periods[selectedIndex]];
+    return [periods[safeIndex]];
   }
 
   if (viewMode === "quarterly") {
-    const quarterStart = Math.floor(selectedIndex / 3) * 3;
+    const quarterStart = Math.floor(safeIndex / 3) * 3;
 
     return periods.slice(quarterStart, quarterStart + 3);
   }
 
-  return periods.slice(0, selectedIndex + 1);
+  return periods.slice(0, safeIndex + 1);
 }
 
 function shortMonth(month: string) {

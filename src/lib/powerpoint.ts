@@ -1,9 +1,7 @@
 "use client";
 
 import type PptxGenJS from "pptxgenjs";
-import { sampleBudget } from "@/data/sampleBudget";
 import { sampleCompany } from "@/data/sampleCompany";
-import { sampleFinancials } from "@/data/sampleFinancials";
 import { sampleForecast, type ForecastVersion } from "@/data/sampleForecast";
 import {
   calculateVarianceDollars,
@@ -19,6 +17,12 @@ import {
   formatRunwayMonths,
   formatVarianceLabel,
 } from "@/lib/formatting";
+import {
+  getActiveFinancialData,
+  getBudgetForMonth,
+  getDataSourceLabel,
+} from "@/lib/localDataStore";
+import type { FinancialPeriod } from "@/lib/calculations";
 
 export type CfoBriefDeckContent = {
   executiveSummary: string[];
@@ -174,11 +178,14 @@ function buildDeckContext(
     throw new Error("Cannot generate CFO deck: reporting month is missing.");
   }
 
-  const index = sampleFinancials.findIndex(
+  const activeData = getActiveFinancialData();
+  const periods = activeData.periods;
+  const index = periods.findIndex(
     (period) => period.month === reportingMonth,
   );
-  const actual = sampleFinancials[index];
-  const budget = sampleBudget[index];
+  const safeIndex = index >= 0 ? index : periods.length - 1;
+  const actual = periods[safeIndex];
+  const budget = getBudgetForMonth(actual.month, safeIndex);
   const normalizedBrief = normalizeBrief(brief, reportingMonth);
 
   if (!actual) {
@@ -205,6 +212,7 @@ function buildDeckContext(
     budget,
     brief: normalizedBrief,
     metricRows,
+    activeData,
     budgetVersion,
     latestForecast,
     budgetSummary,
@@ -507,6 +515,10 @@ function addAppendixSlide(
       "Data sources: local sample P&L, budget, forecast, and cash data.",
       "This deck is a prototype generated from sample TypeScript data.",
       "Revenue, expense, EBITDA, cash, burn, and runway are calculated from local sample values.",
+      `${getDataSourceLabel(context.activeData.dataSource)}.`,
+      ...(context.activeData.dataSource === "uploaded"
+        ? ["Uploaded CSV actuals are stored locally in the browser; cash and runway use sample assumptions until cash upload is built."]
+        : []),
       "Favorable variance logic: higher is favorable for revenue, margin, EBITDA, cash, and runway; lower is favorable for expenses and net burn.",
       "No external accounting, banking, payroll, CRM, AI, or database service is connected.",
     ],
@@ -693,10 +705,7 @@ function addTable(
   });
 }
 
-function buildMetricRows(
-  actual: (typeof sampleFinancials)[number],
-  budget: (typeof sampleBudget)[number],
-): MetricRow[] {
+function buildMetricRows(actual: FinancialPeriod, budget: FinancialPeriod): MetricRow[] {
   return [
     metric("Revenue", actual.revenue, budget.revenue, "currency", "higher"),
     metric("Cost of Revenue", actual.costOfRevenue, budget.costOfRevenue, "currency", "lower"),

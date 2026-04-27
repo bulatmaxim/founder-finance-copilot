@@ -1,9 +1,11 @@
+"use client";
+
+import { useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { MetricCard } from "@/components/MetricCard";
 import { VarianceTable, type VarianceRow } from "@/components/VarianceTable";
 import { sampleBudget } from "@/data/sampleBudget";
-import { sampleFinancials } from "@/data/sampleFinancials";
 import {
   calculateEbitda,
   calculateGrossMargin,
@@ -20,9 +22,12 @@ import {
   formatPercent,
   formatRunwayMonths,
 } from "@/lib/formatting";
-
-const latestActual = sampleFinancials[sampleFinancials.length - 1];
-const latestBudget = sampleBudget[sampleBudget.length - 1];
+import {
+  getActiveFinancialData,
+  getBudgetForMonth,
+  getDataSourceLabel,
+  type ActiveFinancialData,
+} from "@/lib/localDataStore";
 
 function shortMonth(month: string) {
   return month.split(" ")[0];
@@ -45,6 +50,16 @@ function buildVarianceRow(
 }
 
 export function DashboardPageContent() {
+  const [activeData] = useState<ActiveFinancialData>(() =>
+    getActiveFinancialData(),
+  );
+
+  const activeFinancials = activeData.periods;
+  const latestActual = activeFinancials[activeFinancials.length - 1];
+  const latestBudget = getBudgetForMonth(
+    latestActual.month,
+    sampleBudget.length - 1,
+  );
   const grossProfit = calculateGrossProfit(
     latestActual.revenue,
     latestActual.costOfRevenue,
@@ -57,7 +72,15 @@ export function DashboardPageContent() {
   );
   const ebitda = calculateEbitda(grossProfit, operatingExpenses);
   const netBurn = calculateNetBurn(ebitda);
-  const runwayMonths = calculateRunwayMonths(latestActual.cashBalance, netBurn);
+  const calculatedRunwayMonths = calculateRunwayMonths(
+    latestActual.cashBalance,
+    netBurn,
+  );
+  const runwayMonths =
+    activeData.dataSource === "uploaded"
+      ? latestActual.runwayMonths
+      : calculatedRunwayMonths;
+  const dataSourceLabel = getDataSourceLabel(activeData.dataSource);
 
   const metrics = [
     {
@@ -97,7 +120,7 @@ export function DashboardPageContent() {
     },
   ];
 
-  const trendData = sampleFinancials.map((month) => ({
+  const trendData = activeFinancials.map((month) => ({
     month: shortMonth(month.month),
     revenue: month.revenue,
     operatingExpenses: month.operatingExpenses,
@@ -105,8 +128,8 @@ export function DashboardPageContent() {
     runwayMonths: month.runwayMonths,
   }));
 
-  const actualVsBudgetData = sampleFinancials.map((actual, index) => {
-    const budget = sampleBudget[index];
+  const actualVsBudgetData = activeFinancials.map((actual, index) => {
+    const budget = getBudgetForMonth(actual.month, index);
 
     return {
       month: shortMonth(actual.month),
@@ -170,6 +193,15 @@ export function DashboardPageContent() {
           Twelve-month local sample view of financial performance, liquidity,
           runway, and budget discipline.
         </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <DataSourceBadge label={dataSourceLabel} />
+          {activeData.dataSource === "uploaded" ? (
+            <p className="text-sm text-neutral-500">
+              Uploaded CSV data is stored locally in your browser for prototype
+              testing only. Cash and runway still use sample assumptions.
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -183,6 +215,19 @@ export function DashboardPageContent() {
         mode="dashboard"
         showAsk={false}
       />
+
+      {activeData.warnings.length > 0 ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5">
+          <h2 className="text-base font-semibold">Data Assumptions</h2>
+          <ul className="mt-3 space-y-2 text-sm leading-6 text-neutral-700">
+            {activeData.warnings.map((warning) => (
+              <li key={warning} className="ml-4 list-disc">
+                {warning}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-2">
         <DashboardChart
@@ -242,5 +287,13 @@ export function DashboardPageContent() {
 
       <VarianceTable rows={varianceRows} />
     </section>
+  );
+}
+
+function DataSourceBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+      {label}
+    </span>
   );
 }

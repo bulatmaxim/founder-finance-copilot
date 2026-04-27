@@ -1,4 +1,3 @@
-import { sampleBudget } from "@/data/sampleBudget";
 import { sampleCompany } from "@/data/sampleCompany";
 import { sampleFinancials } from "@/data/sampleFinancials";
 import { sampleForecast, type ForecastVersion } from "@/data/sampleForecast";
@@ -12,6 +11,11 @@ import {
   formatRunwayMonths,
   formatVarianceLabel,
 } from "@/lib/formatting";
+import {
+  getActiveFinancialData,
+  getBudgetForMonth,
+  getDataSourceLabel,
+} from "@/lib/localDataStore";
 import type { UploadedFinancialRow } from "@/types/financial";
 
 export type FinanceInsightCategory =
@@ -58,6 +62,8 @@ export type FinanceInsightResult = {
   managementQuestions: string[];
   recommendedActions: string[];
   dataQualityInsights: FinanceInsight[];
+  dataSource: string;
+  dataWarnings: string[];
 };
 
 type FinanceInsightOptions = {
@@ -100,13 +106,15 @@ export function generateFinanceInsights(
     managementQuestions: generateManagementQuestions(options),
     recommendedActions: generateRecommendedActions(options),
     dataQualityInsights,
+    dataSource: getDataSourceLabel(context.activeData.dataSource),
+    dataWarnings: context.activeData.warnings,
   };
 }
 
 export function generateRunwayWarnings(
   options: FinanceInsightOptions = {},
 ): FinanceInsight[] {
-  const { actual, budget } = getInsightContext(options.reportingMonth);
+  const { actual, budget, activeData } = getInsightContext(options.reportingMonth);
   const insights: FinanceInsight[] = [];
 
   if (actual.runwayMonths < 12) {
@@ -127,6 +135,7 @@ export function generateRunwayWarnings(
         `Budget runway: ${formatRunwayMonths(budget.runwayMonths)}`,
         `Cash: ${formatCurrency(actual.cashBalance)}`,
         `Net burn: ${formatCurrency(actual.netBurn)}`,
+        getDataSourceLabel(activeData.dataSource),
       ],
     });
   } else if (actual.runwayMonths < budget.runwayMonths) {
@@ -152,7 +161,9 @@ export function generateRunwayWarnings(
 export function generateVarianceInsights(
   options: FinanceInsightOptions = {},
 ): FinanceInsight[] {
-  const { actual, budget, priorActual } = getInsightContext(options.reportingMonth);
+  const { actual, budget, priorActual, activeData } = getInsightContext(
+    options.reportingMonth,
+  );
   const insights: FinanceInsight[] = [];
   const revenueVariance = calculateVarianceDollars(actual.revenue, budget.revenue);
   const revenueVariancePercent = calculateVariancePercent(
@@ -185,6 +196,7 @@ export function generateVarianceInsights(
         `Actual revenue: ${formatCurrency(actual.revenue)}`,
         `Budget revenue: ${formatCurrency(budget.revenue)}`,
         `Variance: ${formatVarianceLabel(revenueVariance)}`,
+        getDataSourceLabel(activeData.dataSource),
       ],
     });
   } else if (revenueVariance > 0) {
@@ -201,6 +213,7 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `Actual revenue: ${formatCurrency(actual.revenue)}`,
         `Budget revenue: ${formatCurrency(budget.revenue)}`,
+        getDataSourceLabel(activeData.dataSource),
       ],
     });
   }
@@ -219,6 +232,7 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `Actual OpEx: ${formatCurrency(actual.operatingExpenses)}`,
         `Budget OpEx: ${formatCurrency(budget.operatingExpenses)}`,
+        getDataSourceLabel(activeData.dataSource),
       ],
     });
   }
@@ -248,6 +262,7 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `Actual EBITDA: ${formatCurrency(actual.ebitda)}`,
         `Budget EBITDA: ${formatCurrency(budget.ebitda)}`,
+        getDataSourceLabel(activeData.dataSource),
       ],
     });
   }
@@ -268,6 +283,9 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `${priorActual.month} cash: ${formatCurrency(priorActual.cashBalance)}`,
         `${actual.month} cash: ${formatCurrency(actual.cashBalance)}`,
+        activeData.dataSource === "uploaded"
+          ? "Cash uses sample assumption"
+          : getDataSourceLabel(activeData.dataSource),
       ],
     });
   }
@@ -286,6 +304,7 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `Actual net burn: ${formatCurrency(actual.netBurn)}`,
         `Budget net burn: ${formatCurrency(budget.netBurn)}`,
+        getDataSourceLabel(activeData.dataSource),
       ],
     });
   }
@@ -416,7 +435,9 @@ export function generateRecommendedActions(
 }
 
 export function generateFounderSummary(options: FinanceInsightOptions = {}) {
-  const { actual, budget, priorActual } = getInsightContext(options.reportingMonth);
+  const { actual, budget, priorActual, activeData } = getInsightContext(
+    options.reportingMonth,
+  );
   const revenueVariance = actual.revenue - budget.revenue;
   const opexVariance = actual.operatingExpenses - budget.operatingExpenses;
   const ebitdaVariance = actual.ebitda - budget.ebitda;
@@ -436,22 +457,45 @@ export function generateFounderSummary(options: FinanceInsightOptions = {}) {
     ? `cash ${cashChange >= 0 ? "increased" : "declined"} by ${formatCurrency(Math.abs(cashChange))} month over month`
     : `cash ended at ${formatCurrency(actual.cashBalance)}`;
 
-  return `${sampleCompany.name} closed ${actual.month} with ${revenuePhrase}, ${spendPhrase}, and EBITDA ${ebitdaVariance >= 0 ? "ahead of" : "below"} plan by ${formatVarianceLabel(ebitdaVariance)}. ${cashPhrase}, ending with ${formatRunwayMonths(actual.runwayMonths)} of runway. ${forecastRecommendation.shouldUpdate ? "Management should refresh the latest forecast and tighten the investor narrative around the main variance drivers." : "Management can maintain the current forecast posture while continuing to monitor burn and pipeline quality."}`;
+  const sourcePhrase =
+    activeData.dataSource === "uploaded"
+      ? "This analysis uses uploaded CSV P&L actuals; cash and runway remain sample assumptions until cash upload is built."
+      : "This analysis uses local sample financial data.";
+
+  return `${sampleCompany.name} closed ${actual.month} with ${revenuePhrase}, ${spendPhrase}, and EBITDA ${ebitdaVariance >= 0 ? "ahead of" : "below"} plan by ${formatVarianceLabel(ebitdaVariance)}. ${cashPhrase}, ending with ${formatRunwayMonths(actual.runwayMonths)} of runway. ${forecastRecommendation.shouldUpdate ? "Management should refresh the latest forecast and tighten the investor narrative around the main variance drivers." : "Management can maintain the current forecast posture while continuing to monitor burn and pipeline quality."} ${sourcePhrase}`;
 }
 
 export function generateDataQualityInsights(
   options: FinanceInsightOptions = {},
 ): FinanceInsight[] {
   const insights: FinanceInsight[] = [];
+  const activeData = getActiveFinancialData();
 
-  if (!options.uploadedRows || options.uploadedRows.length === 0) {
+  if (activeData.dataSource === "uploaded") {
+    insights.push({
+      id: "uploaded-data-active",
+      title: "Uploaded CSV data is active",
+      category: "Data Quality",
+      severity: "Low",
+      summary:
+        "The finance copilot is using uploaded P&L actuals stored locally in the browser.",
+      whyItMatters:
+        "This proves the local prototype can analyze user-provided actuals without a database or external integrations.",
+      recommendedAction:
+        "Add persistent database storage and formal account mapping before production use.",
+      sourceMetrics: [
+        `Uploaded rows: ${activeData.uploadedRows.length}`,
+        "Cash and runway use sample assumptions",
+      ],
+    });
+  } else if (!options.uploadedRows || options.uploadedRows.length === 0) {
     insights.push({
       id: "uploaded-data-not-linked",
       title: "Uploaded data is not yet connected",
       category: "Data Quality",
       severity: "Low",
       summary:
-        "The finance copilot is using local sample data; uploaded CSV rows are not yet connected to dashboard calculations.",
+        "The finance copilot is using local sample data because no uploaded CSV data is active.",
       whyItMatters:
         "The rule engine can prove the analyst workflow now, but production use will need a governed source of truth.",
       recommendedAction:
@@ -547,12 +591,14 @@ function buildForecastInsights(
 }
 
 function getInsightContext(reportingMonth?: string) {
-  const month = reportingMonth ?? sampleFinancials[sampleFinancials.length - 1].month;
-  const index = sampleFinancials.findIndex((period) => period.month === month);
-  const safeIndex = index >= 0 ? index : sampleFinancials.length - 1;
-  const actual = sampleFinancials[safeIndex];
-  const budget = sampleBudget[safeIndex];
-  const priorActual = safeIndex > 0 ? sampleFinancials[safeIndex - 1] : null;
+  const activeData = getActiveFinancialData();
+  const periods = activeData.periods.length > 0 ? activeData.periods : sampleFinancials;
+  const month = reportingMonth ?? periods[periods.length - 1].month;
+  const index = periods.findIndex((period) => period.month === month);
+  const safeIndex = index >= 0 ? index : periods.length - 1;
+  const actual = periods[safeIndex];
+  const budget = getBudgetForMonth(actual.month, safeIndex);
+  const priorActual = safeIndex > 0 ? periods[safeIndex - 1] : null;
   const latestForecast = getForecastVersion("latest");
   const latestForecastMonth = latestForecast.months.find(
     (period) => period.month === actual.month,
@@ -564,6 +610,7 @@ function getInsightContext(reportingMonth?: string) {
     priorActual,
     latestForecast,
     latestForecastMonth,
+    activeData,
   };
 }
 

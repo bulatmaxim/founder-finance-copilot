@@ -55,8 +55,18 @@ export function FinanceCopilotPanel({
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
           Rule-based finance analysis for {insightResult.companyName}, using
-          local sample data only.
+          local browser data only.
         </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+            {insightResult.dataSource}
+          </span>
+          {insightResult.dataWarnings.map((warning) => (
+            <span key={warning} className="text-sm text-neutral-500">
+              {warning}
+            </span>
+          ))}
+        </div>
       </div>
 
       <section className="rounded-md border border-neutral-200 bg-white p-5">

@@ -2,9 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
-import { sampleBudget } from "@/data/sampleBudget";
 import { sampleCompany } from "@/data/sampleCompany";
-import { sampleFinancials } from "@/data/sampleFinancials";
 import {
   calculateVarianceDollars,
   calculateVariancePercent,
@@ -19,6 +17,12 @@ import {
   formatVarianceLabel,
 } from "@/lib/formatting";
 import { generateFinanceInsights } from "@/lib/financeInsights";
+import {
+  getActiveFinancialData,
+  getBudgetForMonth,
+  getDataSourceLabel,
+  type ActiveFinancialData,
+} from "@/lib/localDataStore";
 import { generateMonthlyCfoDeck } from "@/lib/powerpoint";
 
 type Highlight = {
@@ -48,8 +52,11 @@ type MetricVariance = {
 };
 
 export function CFOBrief() {
+  const [activeData] = useState<ActiveFinancialData>(() =>
+    getActiveFinancialData(),
+  );
   const [selectedMonth, setSelectedMonth] = useState(
-    sampleFinancials[sampleFinancials.length - 1].month,
+    activeData.periods[activeData.periods.length - 1].month,
   );
   const [generatedMonth, setGeneratedMonth] = useState(selectedMonth);
   const [deckMessage, setDeckMessage] = useState("");
@@ -98,8 +105,18 @@ export function CFOBrief() {
           </h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
             Rule-based monthly finance brief for {sampleCompany.name}, using
-            local sample actuals and budget data only.
+            active local actuals and budget data only.
           </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <DataSourceBadge label={getDataSourceLabel(activeData.dataSource)} />
+            {activeData.dataSource === "uploaded" ? (
+              <p className="text-sm text-neutral-500">
+                Uploaded CSV data is stored locally in your browser for
+                prototype testing only. Cash and runway still use sample
+                assumptions.
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -110,7 +127,7 @@ export function CFOBrief() {
               onChange={(event) => setSelectedMonth(event.target.value)}
               className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-950"
             >
-              {sampleFinancials.map((period) => (
+              {activeData.periods.map((period) => (
                 <option key={period.month} value={period.month}>
                   {period.month}
                 </option>
@@ -269,10 +286,13 @@ function BriefSection({
 }
 
 function buildBriefForMonth(month: string): BriefContent {
-  const index = sampleFinancials.findIndex((period) => period.month === month);
-  const actual = sampleFinancials[index];
-  const budget = sampleBudget[index];
-  const priorActual = index > 0 ? sampleFinancials[index - 1] : null;
+  const activeData = getActiveFinancialData();
+  const periods = activeData.periods;
+  const index = periods.findIndex((period) => period.month === month);
+  const safeIndex = index >= 0 ? index : periods.length - 1;
+  const actual = periods[safeIndex];
+  const budget = getBudgetForMonth(actual.month, safeIndex);
+  const priorActual = safeIndex > 0 ? periods[safeIndex - 1] : null;
   const insightResult = generateFinanceInsights({ reportingMonth: month });
 
   if (!actual || !budget) {
@@ -435,6 +455,14 @@ function buildBriefForMonth(month: string): BriefContent {
     actions,
     investorBullets,
   };
+}
+
+function DataSourceBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+      {label}
+    </span>
+  );
 }
 
 function metricVariance(

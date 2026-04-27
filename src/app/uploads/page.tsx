@@ -14,6 +14,13 @@ import {
   pnlActualsSampleCsv,
 } from "@/lib/csvParser";
 import { formatCurrency } from "@/lib/formatting";
+import {
+  clearUploadedActuals,
+  getActiveFinancialData,
+  getDataSourceLabel,
+  getUploadedActualsPayload,
+  saveUploadedActuals,
+} from "@/lib/localDataStore";
 import type {
   ParsedFinancialCsv,
   UploadedFinancialRow,
@@ -23,13 +30,22 @@ import type {
 const reviewStatuses: UploadStatus[] = ["Needs Review", "Needs Mapping", "Failed"];
 
 export default function UploadsPage() {
+  const persistedPayload = getUploadedActualsPayload();
+  const persistedActiveData = getActiveFinancialData();
   const [message, setMessage] = useState("");
   const [toastMessage, setToastMessage] = useState("");
   const [selectedFileName, setSelectedFileName] = useState("");
   const [isParsing, setIsParsing] = useState(false);
   const [parsedCsv, setParsedCsv] = useState<ParsedFinancialCsv | null>(null);
-  const [sessionRows, setSessionRows] = useState<UploadedFinancialRow[]>([]);
-  const [loadedAt, setLoadedAt] = useState("");
+  const [sessionRows, setSessionRows] = useState<UploadedFinancialRow[]>(
+    persistedPayload?.rows ?? [],
+  );
+  const [loadedAt, setLoadedAt] = useState(
+    formatLoadedAt(persistedPayload?.savedAt ?? ""),
+  );
+  const [activeDataSource, setActiveDataSource] = useState(
+    getDataSourceLabel(persistedActiveData.dataSource),
+  );
   const totalFilesUploaded = importHistory.length;
   const filesApproved = importHistory.filter(
     (row) => row.status === "Approved",
@@ -56,6 +72,13 @@ export default function UploadsPage() {
           cash, payroll, revenue, and pipeline data before it flows into
           dashboards and recommendations.
         </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <DataSourceBadge label={activeDataSource} />
+          <p className="text-sm text-neutral-500">
+            Uploaded CSV data is stored locally in your browser for prototype
+            testing only. It is not saved to a database yet.
+          </p>
+        </div>
       </div>
 
       {message ? (
@@ -128,6 +151,16 @@ export default function UploadsPage() {
                 onUseUploadedData={() =>
                   handleUseUploadedData({
                     parsedCsv,
+                    setLoadedAt,
+                    setActiveDataSource,
+                    setMessage,
+                    setSessionRows,
+                    setToastMessage,
+                  })
+                }
+                onClearUploadedData={() =>
+                  handleClearUploadedData({
+                    setActiveDataSource,
                     setLoadedAt,
                     setMessage,
                     setSessionRows,
@@ -208,12 +241,14 @@ async function handlePnlActualsUpload(
 function handleUseUploadedData({
   parsedCsv,
   setLoadedAt,
+  setActiveDataSource,
   setMessage,
   setSessionRows,
   setToastMessage,
 }: {
   parsedCsv: ParsedFinancialCsv | null;
   setLoadedAt: (loadedAt: string) => void;
+  setActiveDataSource: (label: string) => void;
   setMessage: (message: string) => void;
   setSessionRows: (rows: UploadedFinancialRow[]) => void;
   setToastMessage: (message: string) => void;
@@ -253,14 +288,38 @@ function handleUseUploadedData({
     timeStyle: "short",
   });
 
+  saveUploadedActuals(parsedCsv.rows);
   setSessionRows(parsedCsv.rows);
   setLoadedAt(loadedTimestamp);
+  setActiveDataSource(getDataSourceLabel("uploaded"));
   setMessage(
     "Uploaded data is loaded for this session only. Database storage will be added later.",
   );
   setToastMessage("Uploaded data loaded for this session.");
   window.setTimeout(() => setToastMessage(""), 4000);
   console.log("Data loaded successfully: true");
+}
+
+function handleClearUploadedData({
+  setActiveDataSource,
+  setLoadedAt,
+  setMessage,
+  setSessionRows,
+  setToastMessage,
+}: {
+  setActiveDataSource: (label: string) => void;
+  setLoadedAt: (loadedAt: string) => void;
+  setMessage: (message: string) => void;
+  setSessionRows: (rows: UploadedFinancialRow[]) => void;
+  setToastMessage: (message: string) => void;
+}) {
+  clearUploadedActuals();
+  setSessionRows([]);
+  setLoadedAt("");
+  setActiveDataSource(getDataSourceLabel("sample"));
+  setMessage("Uploaded data cleared. The app is back in sample data mode.");
+  setToastMessage("Uploaded data cleared.");
+  window.setTimeout(() => setToastMessage(""), 4000);
 }
 
 function downloadSampleCsv() {
@@ -287,6 +346,7 @@ function PnlActualsUploadControls({
   onFileSelected,
   onDownloadSample,
   onUseUploadedData,
+  onClearUploadedData,
 }: {
   card: UploadCard;
   isParsing: boolean;
@@ -295,6 +355,7 @@ function PnlActualsUploadControls({
   onFileSelected: (file: File) => void;
   onDownloadSample: () => void;
   onUseUploadedData: () => void;
+  onClearUploadedData: () => void;
 }) {
   return (
     <div className="mt-5 space-y-3">
@@ -323,7 +384,7 @@ function PnlActualsUploadControls({
         <p className="text-xs text-neutral-500">Selected: {selectedFileName}</p>
       ) : null}
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2">
         <button
           type="button"
           onClick={onDownloadSample}
@@ -334,20 +395,33 @@ function PnlActualsUploadControls({
         <button
           type="button"
           onClick={onUseUploadedData}
-          disabled={isParsing}
+          disabled={
+            isParsing ||
+            !parsedCsv ||
+            parsedCsv.summary.totalRows === 0 ||
+            parsedCsv.summary.errorRows > 0 ||
+            parsedCsv.errors.length > 0
+          }
           className="h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
         >
           Use Uploaded Data
+        </button>
+        <button
+          type="button"
+          onClick={onClearUploadedData}
+          className="h-10 rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-50"
+        >
+          Clear Uploaded Data
         </button>
       </div>
 
       {!parsedCsv ? (
         <p className="text-xs leading-5 text-neutral-500">
-          Upload a CSV before using data.
+          Please upload a CSV file before using data.
         </p>
       ) : parsedCsv.summary.errorRows > 0 || parsedCsv.errors.length > 0 ? (
         <p className="text-xs leading-5 text-neutral-500">
-          Resolve validation errors before loading this data into the session.
+          Uploaded data has validation errors. Please fix them before using this data.
         </p>
       ) : parsedCsv.summary.totalRows === 0 ? (
         <p className="text-xs leading-5 text-neutral-500">
@@ -622,6 +696,31 @@ function StatusBadge({ status }: { status: string }) {
       {status}
     </span>
   );
+}
+
+function DataSourceBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+      {label}
+    </span>
+  );
+}
+
+function formatLoadedAt(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function isRevenueCategory(category: string) {
