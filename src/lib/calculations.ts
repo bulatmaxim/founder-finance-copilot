@@ -23,6 +23,32 @@ export type VarianceResult = {
   status: VarianceStatus;
 };
 
+export type HireCostInputs = {
+  annualSalary: number;
+  bonusPercent: number;
+  benefitsLoadPercent: number;
+  payrollTaxPercent: number;
+  oneTimeEquipmentCost: number;
+};
+
+export type HireCostImpact = {
+  monthlySalaryCost: number;
+  monthlyBonusCost: number;
+  monthlyBenefitsCost: number;
+  monthlyPayrollTaxCost: number;
+  totalMonthlyCostImpact: number;
+  firstYearCashImpact: number;
+};
+
+export type HireScenario = {
+  name: string;
+  monthlyBurnImpact: number;
+  totalBurn: number;
+  runwayMonths: number;
+  runwayChangeMonths: number;
+  recommendationLevel: "Affordable" | "Monitor Closely" | "Runway Pressure";
+};
+
 export function calculateGrossProfit(revenue: number, costOfRevenue: number) {
   return revenue - costOfRevenue;
 }
@@ -177,6 +203,88 @@ export function getTopUnfavorableVariances<
         Math.abs(second.varianceDollars) - Math.abs(first.varianceDollars),
     )
     .slice(0, limit);
+}
+
+export function calculateHireCostImpact({
+  annualSalary,
+  bonusPercent,
+  benefitsLoadPercent,
+  payrollTaxPercent,
+  oneTimeEquipmentCost,
+}: HireCostInputs): HireCostImpact {
+  const monthlySalaryCost = annualSalary / 12;
+  const monthlyBonusCost = (annualSalary * (bonusPercent / 100)) / 12;
+  const monthlyBenefitsCost = (annualSalary * (benefitsLoadPercent / 100)) / 12;
+  const monthlyPayrollTaxCost = (annualSalary * (payrollTaxPercent / 100)) / 12;
+  const totalMonthlyCostImpact =
+    monthlySalaryCost +
+    monthlyBonusCost +
+    monthlyBenefitsCost +
+    monthlyPayrollTaxCost;
+
+  return {
+    monthlySalaryCost,
+    monthlyBonusCost,
+    monthlyBenefitsCost,
+    monthlyPayrollTaxCost,
+    totalMonthlyCostImpact,
+    firstYearCashImpact: totalMonthlyCostImpact * 12 + oneTimeEquipmentCost,
+  };
+}
+
+export function calculateHireScenario({
+  name,
+  currentCashBalance,
+  currentNetBurn,
+  currentRunwayMonths,
+  monthlyBurnImpact,
+}: {
+  name: string;
+  currentCashBalance: number;
+  currentNetBurn: number;
+  currentRunwayMonths: number;
+  monthlyBurnImpact: number;
+}): HireScenario {
+  const totalBurn = currentNetBurn + monthlyBurnImpact;
+  const runwayMonths = calculateRunwayMonths(currentCashBalance, totalBurn) ?? 0;
+
+  return {
+    name,
+    monthlyBurnImpact,
+    totalBurn,
+    runwayMonths,
+    runwayChangeMonths: runwayMonths - currentRunwayMonths,
+    recommendationLevel: getHireRecommendationLevel(runwayMonths),
+  };
+}
+
+export function getHireRecommendationLevel(runwayMonths: number) {
+  if (runwayMonths > 12) {
+    return "Affordable";
+  }
+
+  if (runwayMonths >= 9) {
+    return "Monitor Closely";
+  }
+
+  return "Runway Pressure";
+}
+
+export function estimateCashOutDate(
+  latestMonth: string,
+  runwayMonths: number,
+) {
+  const [monthName, yearText] = latestMonth.split(" ");
+  const monthIndex = new Date(`${monthName} 1, ${yearText}`).getMonth();
+  const year = Number(yearText);
+  const date = new Date(year, monthIndex, 1);
+
+  date.setMonth(date.getMonth() + Math.floor(runwayMonths));
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(date);
 }
 
 function sumBy(periods: FinancialPeriod[], key: keyof FinancialPeriod) {
