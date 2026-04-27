@@ -14,6 +14,8 @@ import {
   saveLatestAIBrief,
   type AICfoBrief,
 } from "@/lib/localDataStore";
+import { hasSupabaseBrowserEnv } from "@/lib/supabase/client";
+import { saveAIBriefToSupabase } from "@/lib/supabase/data";
 
 type FinanceCopilotPanelProps = {
   reportingMonth?: string;
@@ -101,6 +103,17 @@ export function FinanceCopilotPanel({
       };
 
       saveLatestAIBrief(brief);
+      if (hasSupabaseBrowserEnv()) {
+        try {
+          await saveAIBriefToSupabase({
+            period: financeSummary.period,
+            sourceSummary: financeSummary,
+            aiOutput: brief,
+          });
+        } catch (saveError) {
+          console.error("AI CFO Brief Supabase save failed", saveError);
+        }
+      }
       setAiBrief(brief);
       setToast({
         id: Date.now(),
@@ -193,6 +206,7 @@ export function FinanceCopilotPanel({
           <p className="mt-3 text-sm text-neutral-500">
             Latest AI brief saved locally
             {aiBrief.reportingPeriod ? ` for ${aiBrief.reportingPeriod}` : ""}.
+            {hasSupabaseBrowserEnv() ? " Supabase persistence is enabled." : ""}
           </p>
         ) : null}
       </div>

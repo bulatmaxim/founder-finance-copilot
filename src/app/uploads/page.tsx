@@ -56,6 +56,8 @@ import {
   saveUploadedPipeline,
   saveUploadedRevenueDetail,
 } from "@/lib/localDataStore";
+import { hasSupabaseBrowserEnv } from "@/lib/supabase/client";
+import { clearSupabaseData, persistUploadedCsv } from "@/lib/supabase/data";
 import type {
   ParsedBankTransactionsCsv,
   ParsedCashCsv,
@@ -130,6 +132,7 @@ type UploadConfig = {
 
 type ParsedByKind = Partial<Record<UploadKind, ParsedUpload | null>>;
 type SelectedFileByKind = Partial<Record<UploadKind, string>>;
+type SelectedFileObjectByKind = Partial<Record<UploadKind, File | null>>;
 type LoadingByKind = Partial<Record<UploadKind, boolean>>;
 type LoadedRowsByKind = Partial<Record<UploadKind, AnyUploadRow[]>>;
 type LoadedAtByKind = Partial<Record<UploadKind, string>>;
@@ -144,6 +147,8 @@ export default function UploadsPage() {
   const configs = useMemo(() => buildUploadConfigs(), []);
   const [parsedByKind, setParsedByKind] = useState<ParsedByKind>({});
   const [selectedFiles, setSelectedFiles] = useState<SelectedFileByKind>({});
+  const [selectedFileObjects, setSelectedFileObjects] =
+    useState<SelectedFileObjectByKind>({});
   const [loadingByKind, setLoadingByKind] = useState<LoadingByKind>({});
   const [loadedRows, setLoadedRows] = useState<LoadedRowsByKind>(() =>
     Object.fromEntries(
@@ -195,6 +200,7 @@ export default function UploadsPage() {
 
   async function handleFileSelected(config: UploadConfig, file: File) {
     setSelectedFiles((current) => ({ ...current, [config.kind]: file.name }));
+    setSelectedFileObjects((current) => ({ ...current, [config.kind]: file }));
     setParsedByKind((current) => ({ ...current, [config.kind]: null }));
     setLoadingByKind((current) => ({ ...current, [config.kind]: true }));
 
@@ -238,7 +244,7 @@ export default function UploadsPage() {
     }
   }
 
-  function handleUseUploadedData(config: UploadConfig) {
+  async function handleUseUploadedData(config: UploadConfig) {
     const parsed = parsedByKind[config.kind];
 
     if (!parsed || parsed.summary.totalRows === 0) {
@@ -263,19 +269,60 @@ export default function UploadsPage() {
 
     setLoadedRows((current) => ({ ...current, [config.kind]: parsed.rows }));
     setLoadedAt((current) => ({ ...current, [config.kind]: timestamp }));
-    notify(
-      parsed.summary.warningRows > 0 ? "warning" : "success",
-      `${config.title} loaded for this session.`,
-      "Stored locally in this browser only.",
-    );
+
+    if (!hasSupabaseBrowserEnv()) {
+      notify(
+        parsed.summary.warningRows > 0 ? "warning" : "success",
+        `${config.title} loaded for this session.`,
+        "Stored locally because Supabase environment variables are not configured.",
+      );
+      return;
+    }
+
+    try {
+      await persistUploadedCsv({
+        dataType: config.kind,
+        displayName: config.title,
+        file: selectedFileObjects[config.kind] ?? null,
+        parsed,
+      });
+      notify(
+        parsed.summary.warningRows > 0 ? "warning" : "success",
+        `${config.title} saved to Supabase.`,
+        "The parsed rows and original CSV file are persisted for this company.",
+      );
+    } catch (error) {
+      console.error(`${config.title} Supabase persistence failed`, error);
+      notify(
+        "warning",
+        `${config.title} loaded locally, but Supabase save failed.`,
+        error instanceof Error ? error.message : "Check auth, database schema, and storage bucket setup.",
+      );
+    }
   }
 
-  function handleClear(config: UploadConfig) {
+  async function handleClear(config: UploadConfig) {
     config.clear();
     setLoadedRows((current) => ({ ...current, [config.kind]: [] }));
     setLoadedAt((current) => ({ ...current, [config.kind]: "" }));
     setParsedByKind((current) => ({ ...current, [config.kind]: null }));
     setSelectedFiles((current) => ({ ...current, [config.kind]: "" }));
+    setSelectedFileObjects((current) => ({ ...current, [config.kind]: null }));
+
+    if (hasSupabaseBrowserEnv()) {
+      try {
+        await clearSupabaseData(config.kind);
+      } catch (error) {
+        console.error(`${config.title} Supabase clear failed`, error);
+        notify(
+          "warning",
+          `${config.title} cleared locally, but Supabase clear failed.`,
+          error instanceof Error ? error.message : undefined,
+        );
+        return;
+      }
+    }
+
     notify("info", `${config.title} cleared.`, "The app will fall back to sample or unavailable data where needed.");
   }
 
@@ -292,13 +339,13 @@ export default function UploadsPage() {
         </h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
           Local intake center for {sampleCompany.name}. Upload CSVs, validate
-          them in the browser, and save them to localStorage for prototype
-          analysis.
+          them in the browser, and save parsed data to Supabase when signed in.
         </p>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-500">
           Uploaded actuals, budget, cash, payroll, revenue, pipeline, bank, and
-          forecast data are stored locally in your browser for prototype testing
-          only. They are not saved to a database yet.
+          forecast data are stored in Supabase for this company when configured.
+          If Supabase is unavailable, the localStorage fallback remains active
+          for development.
         </p>
       </div>
 
@@ -309,7 +356,7 @@ export default function UploadsPage() {
           <div>
             <h2 className="text-lg font-semibold">{section}</h2>
             <p className="mt-1 text-sm text-neutral-500">
-              Upload, preview, validate, load, and clear local CSV data.
+              Upload, preview, validate, save, and clear CSV data.
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -328,8 +375,8 @@ export default function UploadsPage() {
                   onDownloadSample={() =>
                     downloadCsv(config.sampleCsv, config.sampleFileName)
                   }
-                  onUseUploadedData={() => handleUseUploadedData(config)}
-                  onClear={() => handleClear(config)}
+                  onUseUploadedData={() => void handleUseUploadedData(config)}
+                  onClear={() => void handleClear(config)}
                 />
               ))}
           </div>

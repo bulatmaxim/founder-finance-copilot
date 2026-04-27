@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Sidebar } from "@/components/Sidebar";
+import { SupabaseDataHydrator } from "@/components/SupabaseDataHydrator";
 import { TopBar } from "@/components/TopBar";
 import "./globals.css";
 
@@ -17,6 +18,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <div className="min-h-screen bg-white text-neutral-950">
+          <SupabaseDataHydrator />
           <Sidebar />
           <div className="min-h-screen lg:pl-72">
             <TopBar />
