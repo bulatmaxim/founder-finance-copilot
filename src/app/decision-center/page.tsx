@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { sampleCompany } from "@/data/sampleCompany";
 import { sampleFinancials } from "@/data/sampleFinancials";
 import {
@@ -187,6 +188,12 @@ export default function DecisionCenterPage() {
           </ol>
         </section>
       </div>
+
+      <FinanceCopilotPanel
+        reportingMonth={latestFinancials.month}
+        mode="dashboard"
+        showAsk
+      />
     </section>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { sampleBudget } from "@/data/sampleBudget";
 import { sampleCompany } from "@/data/sampleCompany";
 import { sampleFinancials } from "@/data/sampleFinancials";
@@ -17,6 +18,7 @@ import {
   formatRunwayMonths,
   formatVarianceLabel,
 } from "@/lib/formatting";
+import { generateFinanceInsights } from "@/lib/financeInsights";
 import { generateMonthlyCfoDeck } from "@/lib/powerpoint";
 
 type Highlight = {
@@ -174,6 +176,8 @@ export function CFOBrief() {
         </div>
       </section>
 
+      <FinanceCopilotPanel reportingMonth={generatedMonth} mode="reports" />
+
       <BriefSection title="Executive Summary" items={brief.executiveSummary} />
 
       <section className="rounded-md border border-neutral-200 bg-white">
@@ -269,6 +273,7 @@ function buildBriefForMonth(month: string): BriefContent {
   const actual = sampleFinancials[index];
   const budget = sampleBudget[index];
   const priorActual = index > 0 ? sampleFinancials[index - 1] : null;
+  const insightResult = generateFinanceInsights({ reportingMonth: month });
 
   if (!actual || !budget) {
     throw new Error(`Missing local sample data for reporting period ${month}.`);
@@ -313,10 +318,9 @@ function buildBriefForMonth(month: string): BriefContent {
         : "continued planned investment";
 
   const executiveSummary = [
-    `${sampleCompany.name} generated ${formatCurrency(actual.revenue)} of revenue in ${month}, ${revenue.status === "Favorable" ? "ahead of" : revenue.status === "Unfavorable" ? "below" : "in line with"} budget by ${formatVarianceLabel(revenue.dollars)} (${formatPercentVarianceLabel(revenue.percent)}).`,
-    `Operating expenses were ${formatCurrency(actual.operatingExpenses)}, ${operatingExpenses.status === "Favorable" ? "favorable to" : operatingExpenses.status === "Unfavorable" ? "above" : "in line with"} budget by ${formatVarianceLabel(operatingExpenses.dollars)}.`,
-    `EBITDA finished at ${formatCurrency(actual.ebitda)}, ${ebitda.status === "Favorable" ? "better than" : ebitda.status === "Unfavorable" ? "below" : "in line with"} plan by ${formatVarianceLabel(ebitda.dollars)} due to ${profitabilityDriver}.`,
-  ];
+    insightResult.founderSummary,
+    ...insightResult.priorityAlerts.slice(0, 3).map((insight) => insight.summary),
+  ].slice(0, 5);
 
   const revenueCommentary =
     revenue.status === "Favorable"
@@ -385,21 +389,8 @@ function buildBriefForMonth(month: string): BriefContent {
     runwayMonths: actual.runwayMonths,
   });
 
-  const actions = buildActions({
-    revenue,
-    operatingExpenses,
-    ebitda,
-    netBurn,
-    runwayMonths: actual.runwayMonths,
-  });
-
-  const investorBullets = [
-    `${month} revenue was ${formatCurrency(actual.revenue)}, ${revenue.status === "Favorable" ? "ahead of" : revenue.status === "Unfavorable" ? "below" : "in line with"} budget by ${formatVarianceLabel(revenue.dollars)}.`,
-    `Gross margin was ${formatPercent(actual.grossMargin)} versus ${formatPercent(budget.grossMargin)} budget.`,
-    `Ending cash was ${formatCurrency(actual.cashBalance)} with ${formatRunwayMonths(actual.runwayMonths)} of runway.`,
-    `Net burn was ${formatCurrency(actual.netBurn)}, ${netBurn.status === "Favorable" ? "below" : netBurn.status === "Unfavorable" ? "above" : "in line with"} plan.`,
-    `Management focus: ${actions[0].toLowerCase()}`,
-  ];
+  const actions = insightResult.recommendedActions;
+  const investorBullets = insightResult.investorUpdateBullets;
 
   return {
     executiveSummary,
@@ -521,56 +512,6 @@ function buildRisks({
   }
 
   return risks.slice(0, 5);
-}
-
-function buildActions({
-  revenue,
-  operatingExpenses,
-  ebitda,
-  netBurn,
-  runwayMonths,
-}: {
-  revenue: MetricVariance;
-  operatingExpenses: MetricVariance;
-  ebitda: MetricVariance;
-  netBurn: MetricVariance;
-  runwayMonths: number;
-}) {
-  const actions: string[] = [];
-
-  if (operatingExpenses.status === "Unfavorable") {
-    actions.push("Review expense categories driving the unfavorable variance.");
-  }
-
-  if (revenue.status === "Unfavorable") {
-    actions.push("Investigate the revenue shortfall versus budget.");
-  }
-
-  if (netBurn.status === "Unfavorable") {
-    actions.push("Update the latest forecast to reflect higher burn.");
-  }
-
-  if (runwayMonths < 12) {
-    actions.push("Review the hiring plan and discretionary spend against runway targets.");
-  }
-
-  if (ebitda.status === "Unfavorable") {
-    actions.push("Prepare management commentary explaining EBITDA performance versus plan.");
-  }
-
-  actions.push("Prepare investor update language around cash runway.");
-
-  return ensureCount(actions, [
-    "Refresh the latest forecast with actual monthly performance.",
-    "Confirm whether favorable variances are timing-related or structural.",
-    "Review hiring, vendor, and go-to-market spend before the next close.",
-  ]);
-}
-
-function ensureCount(items: string[], fallback: string[]) {
-  const unique = [...new Set([...items, ...fallback])];
-
-  return unique.slice(0, 5);
 }
 
 function formatValue(value: number, format: "currency" | "percent" | "months") {

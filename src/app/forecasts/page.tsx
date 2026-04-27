@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
+import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import {
   forecastVersionOptions,
   sampleForecast,
@@ -232,6 +233,8 @@ export default function ForecastsPage() {
           )}
         />
       </div>
+
+      <FinanceCopilotPanel mode="forecast" />
 
       <ForecastTable version={selectedVersion} />
 

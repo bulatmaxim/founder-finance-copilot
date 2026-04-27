@@ -1,4 +1,5 @@
 import { DashboardChart } from "@/components/DashboardChart";
+import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { MetricCard } from "@/components/MetricCard";
 import { VarianceTable, type VarianceRow } from "@/components/VarianceTable";
 import { sampleBudget } from "@/data/sampleBudget";
@@ -176,6 +177,12 @@ export function DashboardPageContent() {
           <MetricCard key={metric.label} {...metric} />
         ))}
       </div>
+
+      <FinanceCopilotPanel
+        reportingMonth={latestActual.month}
+        mode="dashboard"
+        showAsk={false}
+      />
 
       <div className="grid gap-6 xl:grid-cols-2">
         <DashboardChart
