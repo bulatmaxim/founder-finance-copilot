@@ -1,0 +1,162 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { formatCurrencyThousands } from "@/lib/formatting";
+
+type ChartDatum = {
+  month: string;
+  [key: string]: string | number;
+};
+
+type ChartSeries = {
+  dataKey: string;
+  label: string;
+  stroke?: string;
+  fill?: string;
+};
+
+type DashboardChartProps = {
+  title: string;
+  description?: string;
+  data: ChartDatum[];
+  series: ChartSeries[];
+  variant?: "line" | "bar";
+  valueType?: "currency" | "months";
+};
+
+export function DashboardChart({
+  title,
+  description,
+  data,
+  series,
+  variant = "line",
+  valueType = "currency",
+}: DashboardChartProps) {
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      setIsMounted(true);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const formatValue = (value: number) => {
+    if (valueType === "months") {
+      return `${value.toFixed(1)} mo`;
+    }
+
+    return formatCurrencyThousands(value);
+  };
+
+  return (
+    <section className="rounded-md border border-neutral-200 bg-white p-5">
+      <div>
+        <h2 className="text-base font-semibold">{title}</h2>
+        {description ? (
+          <p className="mt-1 text-sm text-neutral-500">{description}</p>
+        ) : null}
+      </div>
+
+      <div className="mt-5 h-72">
+        {isMounted ? (
+          <ResponsiveContainer width="100%" height="100%">
+          {variant === "bar" ? (
+            <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="#e5e5e5" vertical={false} />
+              <XAxis
+                dataKey="month"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "#737373", fontSize: 12 }}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "#737373", fontSize: 12 }}
+                tickFormatter={(value) => formatValue(Number(value))}
+              />
+              <Tooltip
+                cursor={{ fill: "#f5f5f5" }}
+                formatter={(value, name) => [
+                  formatValue(Number(value)),
+                  series.find((item) => item.dataKey === name)?.label ?? name,
+                ]}
+                labelClassName="font-medium"
+                contentStyle={{
+                  border: "1px solid #d4d4d4",
+                  borderRadius: 6,
+                  boxShadow: "none",
+                }}
+              />
+              {series.map((item) => (
+                <Bar
+                  key={item.dataKey}
+                  dataKey={item.dataKey}
+                  name={item.label}
+                  fill={item.fill ?? "#111111"}
+                  radius={[3, 3, 0, 0]}
+                />
+              ))}
+            </BarChart>
+          ) : (
+            <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="#e5e5e5" vertical={false} />
+              <XAxis
+                dataKey="month"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "#737373", fontSize: 12 }}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "#737373", fontSize: 12 }}
+                tickFormatter={(value) => formatValue(Number(value))}
+              />
+              <Tooltip
+                formatter={(value, name) => [
+                  formatValue(Number(value)),
+                  series.find((item) => item.dataKey === name)?.label ?? name,
+                ]}
+                labelClassName="font-medium"
+                contentStyle={{
+                  border: "1px solid #d4d4d4",
+                  borderRadius: 6,
+                  boxShadow: "none",
+                }}
+              />
+              {series.map((item) => (
+                <Line
+                  key={item.dataKey}
+                  type="monotone"
+                  dataKey={item.dataKey}
+                  name={item.label}
+                  stroke={item.stroke ?? "#111111"}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              ))}
+            </LineChart>
+          )}
+          </ResponsiveContainer>
+        ) : (
+          <div className="h-full rounded-md border border-neutral-100 bg-neutral-50" />
+        )}
+      </div>
+    </section>
+  );
+}
