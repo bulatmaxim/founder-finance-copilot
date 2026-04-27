@@ -59,17 +59,26 @@ export function CFOBrief() {
   );
 
   async function handleDeckGeneration() {
+    const deckMonth = selectedMonth;
+
+    setGeneratedMonth(deckMonth);
     setIsGeneratingDeck(true);
     setDeckMessage("Generating PowerPoint deck from local sample data...");
 
     try {
+      const deckBrief = buildBriefForMonth(deckMonth);
       const fileName = await generateMonthlyCfoDeck({
-        reportingMonth: generatedMonth,
-        brief,
+        reportingMonth: deckMonth,
+        brief: deckBrief,
       });
       setDeckMessage(`${fileName} was generated and sent to your browser downloads.`);
-    } catch {
-      setDeckMessage("Deck generation failed. Please try again from the local app.");
+    } catch (error) {
+      console.error("Monthly CFO Deck generation failed", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown PowerPoint export error.";
+      setDeckMessage(`Deck generation failed: ${message}`);
     } finally {
       setIsGeneratingDeck(false);
     }
@@ -261,6 +270,10 @@ function buildBriefForMonth(month: string): BriefContent {
   const budget = sampleBudget[index];
   const priorActual = index > 0 ? sampleFinancials[index - 1] : null;
 
+  if (!actual || !budget) {
+    throw new Error(`Missing local sample data for reporting period ${month}.`);
+  }
+
   const revenue = metricVariance(actual.revenue, budget.revenue, "higher");
   const grossMargin = metricVariance(
     actual.grossMargin,
@@ -367,7 +380,6 @@ function buildBriefForMonth(month: string): BriefContent {
     revenue,
     operatingExpenses,
     ebitda,
-    cashBalance,
     netBurn,
     runway,
     runwayMonths: actual.runwayMonths,
@@ -471,7 +483,6 @@ function buildRisks({
   revenue,
   operatingExpenses,
   ebitda,
-  cashBalance,
   netBurn,
   runway,
   runwayMonths,
@@ -479,7 +490,6 @@ function buildRisks({
   revenue: MetricVariance;
   operatingExpenses: MetricVariance;
   ebitda: MetricVariance;
-  cashBalance: MetricVariance;
   netBurn: MetricVariance;
   runway: MetricVariance;
   runwayMonths: number;
@@ -510,15 +520,7 @@ function buildRisks({
     risks.push("EBITDA is below budget, indicating profitability is behind plan.");
   }
 
-  if (cashBalance.status === "Unfavorable") {
-    risks.push("Cash balance is below budget, tightening the margin for execution.");
-  }
-
-  return ensureCount(risks, [
-    "Forecast accuracy depends on maintaining the current revenue growth trajectory.",
-    "Hiring and vendor commitments should remain tied to budget discipline.",
-    "Cash runway should be reviewed before any material increase in fixed costs.",
-  ]);
+  return risks.slice(0, 5);
 }
 
 function buildActions({

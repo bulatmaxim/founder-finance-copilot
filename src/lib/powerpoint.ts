@@ -1,6 +1,6 @@
 "use client";
 
-import pptxgen from "pptxgenjs";
+import type PptxGenJS from "pptxgenjs";
 import { sampleBudget } from "@/data/sampleBudget";
 import { sampleCompany } from "@/data/sampleCompany";
 import { sampleFinancials } from "@/data/sampleFinancials";
@@ -39,7 +39,8 @@ type MetricRow = {
   favorableDirection: FavorableDirection;
 };
 
-type Slide = ReturnType<ReturnType<typeof createDeck>["addSlide"]>;
+type Slide = ReturnType<PptxGenJS["addSlide"]>;
+type PptxGenConstructor = new () => PptxGenJS;
 
 const colors = {
   black: "111111",
@@ -50,15 +51,25 @@ const colors = {
   white: "FFFFFF",
 };
 
+const pptxMimeType =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const shapeLine = "line";
+const shapeRect = "rect";
+
 export async function generateMonthlyCfoDeck({
   reportingMonth,
   brief,
 }: {
   reportingMonth: string;
-  brief: CfoBriefDeckContent;
+  brief: CfoBriefDeckContent | null | undefined;
 }) {
-  const pptx = createDeck();
+  assertBrowserRuntime();
+
+  const { default: PptxGenJSConstructor } = await import("pptxgenjs");
+  const pptx = createDeck(PptxGenJSConstructor);
   const context = buildDeckContext(reportingMonth, brief);
+  validateDeckContext(context);
+
   const slides = [
     addTitleSlide,
     addExecutiveSummarySlide,
@@ -79,19 +90,74 @@ export async function generateMonthlyCfoDeck({
     builder(slide, context, index + 1);
   });
 
-  const fileName = `Acme_AI_Monthly_CFO_Deck_${reportingMonth.replace(" ", "_")}.pptx`;
-  await pptx.writeFile({ fileName });
+  const fileName = `Acme_AI_Monthly_CFO_Deck_${sanitizeReportingMonth(context.reportingMonth)}.pptx`;
+  const content = await pptx.write({ outputType: "blob" });
+  downloadBlob(toPptxBlob(content), fileName);
 
   return fileName;
 }
 
-function createDeck() {
-  const pptx = new pptxgen();
+function assertBrowserRuntime() {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    throw new Error(
+      "Cannot generate CFO deck outside the browser. Open the local app and click the Reports page button.",
+    );
+  }
+}
+
+function toPptxBlob(content: string | ArrayBuffer | Blob | Uint8Array) {
+  if (content instanceof Blob) {
+    return content;
+  }
+
+  if (content instanceof ArrayBuffer) {
+    return new Blob([content], { type: pptxMimeType });
+  }
+
+  if (content instanceof Uint8Array) {
+    const copy = new ArrayBuffer(content.byteLength);
+    new Uint8Array(copy).set(content);
+
+    return new Blob([copy], { type: pptxMimeType });
+  }
+
+  if (typeof content === "string") {
+    return new Blob([content], { type: pptxMimeType });
+  }
+
+  throw new Error("Cannot generate CFO deck: PptxGenJS returned an unsupported file payload.");
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = fileName;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+}
+
+function sanitizeReportingMonth(reportingMonth: string) {
+  return (
+    reportingMonth
+      .trim()
+      .replace(/[^A-Za-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "Reporting_Period"
+  );
+}
+
+function createDeck(PptxGenJSConstructor: PptxGenConstructor) {
+  const pptx = new PptxGenJSConstructor();
   pptx.layout = "LAYOUT_WIDE";
   pptx.author = "Founder Finance Copilot";
-  pptx.company = sampleCompany.name;
+  pptx.company = getCompanyName();
   pptx.subject = "Monthly CFO Brief";
-  pptx.title = "Acme AI Monthly CFO Brief";
+  pptx.title = `${getCompanyName()} Monthly CFO Brief`;
   pptx.theme = {
     headFontFace: "Arial",
     bodyFontFace: "Arial",
@@ -100,12 +166,33 @@ function createDeck() {
   return pptx;
 }
 
-function buildDeckContext(reportingMonth: string, brief: CfoBriefDeckContent) {
+function buildDeckContext(
+  reportingMonth: string,
+  brief: CfoBriefDeckContent | null | undefined,
+) {
+  if (!reportingMonth) {
+    throw new Error("Cannot generate CFO deck: reporting month is missing.");
+  }
+
   const index = sampleFinancials.findIndex(
     (period) => period.month === reportingMonth,
   );
   const actual = sampleFinancials[index];
   const budget = sampleBudget[index];
+  const normalizedBrief = normalizeBrief(brief, reportingMonth);
+
+  if (!actual) {
+    throw new Error(
+      `Cannot generate CFO deck: no local financial data found for ${reportingMonth}.`,
+    );
+  }
+
+  if (!budget) {
+    throw new Error(
+      `Cannot generate CFO deck: no local budget data found for ${reportingMonth}.`,
+    );
+  }
+
   const budgetVersion = getForecastVersion("budget");
   const latestForecast = getForecastVersion("latest");
   const budgetSummary = summarizeForecast(budgetVersion);
@@ -116,7 +203,7 @@ function buildDeckContext(reportingMonth: string, brief: CfoBriefDeckContent) {
     reportingMonth,
     actual,
     budget,
-    brief,
+    brief: normalizedBrief,
     metricRows,
     budgetVersion,
     latestForecast,
@@ -126,13 +213,85 @@ function buildDeckContext(reportingMonth: string, brief: CfoBriefDeckContent) {
   };
 }
 
+function normalizeBrief(
+  brief: CfoBriefDeckContent | null | undefined,
+  reportingMonth: string,
+): CfoBriefDeckContent {
+  return {
+    executiveSummary: ensureTextArray(brief?.executiveSummary, [
+      `${getCompanyName()} generated a local sample CFO deck for ${reportingMonth}.`,
+      "Financial performance is based on local sample actuals, budget, forecast, and cash data.",
+      "Management should review revenue, expense, EBITDA, burn, and runway trends before investor distribution.",
+    ]),
+    revenueCommentary: ensureTextArray(brief?.revenueCommentary, [
+      "Revenue performance should be reviewed against budget and the latest forecast.",
+    ]),
+    expenseCommentary: ensureTextArray(brief?.expenseCommentary, [
+      "Operating expenses should be reviewed against budget by major category.",
+    ]),
+    cashRunwayCommentary: ensureTextArray(brief?.cashRunwayCommentary, [
+      "Cash balance, net burn, and runway are based on local sample data.",
+    ]),
+    budgetCommentary: ensureTextArray(brief?.budgetCommentary, [
+      "Budget versus actuals are calculated from local sample data.",
+    ]),
+    risks: ensureTextArray(brief?.risks, [
+      "No additional data-supported CFO risks were identified in the local sample for this period.",
+    ]),
+    actions: ensureTextArray(brief?.actions, [
+      "Refresh the latest forecast with actual monthly performance.",
+      "Review expense categories and hiring plans against runway targets.",
+      "Prepare investor update language using the monthly CFO brief.",
+    ]),
+    investorBullets: ensureTextArray(brief?.investorBullets, [
+      `${getCompanyName()} completed the ${reportingMonth} local sample CFO review.`,
+      "The update is based on sample financials, budget, forecast, and cash data.",
+      "Management is monitoring revenue, burn, EBITDA, and runway versus plan.",
+    ]),
+  };
+}
+
+function ensureTextArray(value: string[] | undefined, fallback: string[]) {
+  const cleaned = Array.isArray(value)
+    ? value.filter((item) => typeof item === "string" && item.trim().length > 0)
+    : [];
+
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
+function validateDeckContext(context: ReturnType<typeof buildDeckContext>) {
+  const missing: string[] = [];
+
+  if (!getCompanyName()) missing.push("company name");
+  if (!context.reportingMonth) missing.push("reporting month");
+  if (!context.actual) missing.push("latest financial data");
+  if (!context.budget) missing.push("budget data");
+  if (!context.budgetVersion?.months?.length) missing.push("budget forecast data");
+  if (!context.latestForecast?.months?.length) missing.push("latest forecast data");
+  if (!context.metricRows.length) missing.push("metrics");
+  if (!context.brief.executiveSummary.length) missing.push("CFO brief executive summary");
+  if (!context.brief.risks.length) missing.push("risks");
+  if (!context.brief.actions.length) missing.push("recommended actions");
+  if (!context.brief.investorBullets.length) missing.push("investor update bullets");
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Cannot generate CFO deck: missing ${missing.join(", ")}.`,
+    );
+  }
+}
+
+function getCompanyName() {
+  return sampleCompany.name?.trim() || "Acme AI";
+}
+
 function addTitleSlide(
   slide: Slide,
   context: ReturnType<typeof buildDeckContext>,
   pageNumber: number,
 ) {
   slide.background = { color: colors.white };
-  slide.addText(sampleCompany.name, {
+  slide.addText(getCompanyName(), {
     x: 0.75,
     y: 1.35,
     w: 6.5,
@@ -164,7 +323,7 @@ function addTitleSlide(
     color: colors.gray,
     margin: 0,
   });
-  slide.addShape(pptxgen.ShapeType.line, {
+  slide.addShape(shapeLine, {
     x: 0.75,
     y: 3.72,
     w: 4.5,
@@ -386,7 +545,7 @@ function addSlideShell(
     align: "right",
     margin: 0,
   });
-  slide.addShape(pptxgen.ShapeType.line, {
+  slide.addShape(shapeLine, {
     x: 0.65,
     y: 0.98,
     w: 12.05,
@@ -397,14 +556,14 @@ function addSlideShell(
 }
 
 function addFooter(slide: Slide, reportingMonth: string, pageNumber: number) {
-  slide.addShape(pptxgen.ShapeType.line, {
+  slide.addShape(shapeLine, {
     x: 0.65,
     y: 6.95,
     w: 12.05,
     h: 0,
     line: { color: colors.lightGray, width: 0.75 },
   });
-  slide.addText(`${sampleCompany.name} | ${reportingMonth}`, {
+  slide.addText(`${getCompanyName()} | ${reportingMonth}`, {
     x: 0.65,
     y: 7.08,
     w: 3.4,
@@ -439,7 +598,7 @@ function addMetricStrip(slide: Slide, metrics: [string, string][]) {
   const width = 11.85 / metrics.length;
   metrics.forEach(([label, value], index) => {
     const x = 0.75 + index * width;
-    slide.addShape(pptxgen.ShapeType.rect, {
+    slide.addShape(shapeRect, {
       x,
       y: 1.35,
       w: width - 0.12,
@@ -529,9 +688,7 @@ function addTable(
     border: { type: "solid", color: colors.lightGray, pt: 0.6 },
     fill: { color: colors.white },
     margin: 0.06,
-    valign: "mid",
-    fit: "shrink",
-    autoFit: false,
+    valign: "middle",
     rowH: h / rows.length,
   });
 }
