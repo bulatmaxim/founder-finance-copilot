@@ -14,11 +14,16 @@ import {
 import {
   getActiveBudgetData,
   getActiveCashData,
+  getActiveForecastData,
   getActiveFinancialData,
   getActualsSourceLabel,
   getBudgetSourceLabel,
   getBudgetForMonth,
   getCashSourceLabel,
+  getUploadedBankTransactions,
+  getUploadedPayroll,
+  getUploadedPipeline,
+  getUploadedRevenueDetail,
 } from "@/lib/localDataStore";
 import type { UploadedFinancialRow } from "@/types/financial";
 
@@ -30,7 +35,10 @@ export type FinanceInsightCategory =
   | "Forecast"
   | "Budget"
   | "Data Quality"
-  | "Investor Update";
+  | "Investor Update"
+  | "Payroll"
+  | "Pipeline"
+  | "Banking";
 
 export type FinanceInsightSeverity = "Low" | "Medium" | "High";
 
@@ -92,10 +100,12 @@ export function generateFinanceInsights(
   const forecastRecommendation = generateForecastRecommendations(options);
   const forecastInsights = buildForecastInsights(forecastRecommendation);
   const dataQualityInsights = generateDataQualityInsights(options);
+  const operatingDataInsights = generateOperatingDataInsights(options);
   const insights = sortInsights([
     ...varianceInsights,
     ...runwayWarnings,
     ...forecastInsights,
+    ...operatingDataInsights,
     ...dataQualityInsights,
   ]);
 
@@ -481,6 +491,8 @@ export function generateManagementQuestions(
     "Is the current forecast still realistic given the latest actuals?",
     "Does the company need to prepare fundraising materials earlier than planned?",
   ];
+  const pipelineRows = getUploadedPipeline();
+  const revenueRows = getUploadedRevenueDetail();
 
   if (actual.revenue >= budget.revenue) {
     questions[0] =
@@ -490,6 +502,16 @@ export function generateManagementQuestions(
   if (actual.runwayMonths >= 12) {
     questions[4] =
       "What runway threshold should trigger fundraising preparation or deeper cost controls?";
+  }
+
+  if (pipelineRows.length > 0) {
+    questions[3] =
+      "Does weighted pipeline coverage support the next forecast period?";
+  }
+
+  if (revenueRows.length > 0) {
+    questions[0] =
+      "Is revenue concentration acceptable by customer and product?";
   }
 
   return questions;
@@ -508,6 +530,14 @@ export function generateRecommendedActions(
 
   if (actual.operatingExpenses > budget.operatingExpenses) {
     actions.push("Review operating expense categories and identify timing versus structural spend.");
+  }
+
+  if (getUploadedPayroll().length > 0) {
+    actions.push("Review payroll and hiring plans against burn and runway targets.");
+  }
+
+  if (getUploadedPipeline().length > 0) {
+    actions.push("Validate pipeline timing, probability, and forecast coverage.");
   }
 
   if (actual.runwayMonths < 12) {
@@ -612,6 +642,140 @@ export function generateDataQualityInsights(
         recommendedAction:
           "Resolve upload validation errors before replacing sample data in dashboards or reports.",
         sourceMetrics: [`Uploaded rows: ${options.uploadedRows.length}`],
+      });
+    }
+  }
+
+  return insights;
+}
+
+export function generateOperatingDataInsights(
+  options: FinanceInsightOptions = {},
+): FinanceInsight[] {
+  const { actual, latestForecastMonth } = getInsightContext(options.reportingMonth);
+  const insights: FinanceInsight[] = [];
+  const payrollRows = getUploadedPayroll().filter((row) => row.status !== "Error");
+  const revenueRows = getUploadedRevenueDetail().filter((row) => row.status !== "Error");
+  const pipelineRows = getUploadedPipeline().filter((row) => row.status !== "Error");
+  const bankRows = getUploadedBankTransactions().filter((row) => row.status !== "Error");
+  const activeForecast = getActiveForecastData();
+
+  if (payrollRows.length > 0) {
+    const latestPayrollMonth = [...new Set(payrollRows.map((row) => row.month))]
+      .sort()
+      .at(-1);
+    const latestPayrollRows = payrollRows.filter(
+      (row) => row.month === latestPayrollMonth,
+    );
+    const payrollCost = latestPayrollRows.reduce(
+      (total, row) => total + (row.totalMonthlyPayrollCost ?? 0),
+      0,
+    );
+    const payrollShare = actual.operatingExpenses > 0 ? payrollCost / actual.operatingExpenses : 0;
+
+    if (payrollShare > 0.4) {
+      insights.push({
+        id: "payroll-largest-cost-driver",
+        title: "Payroll is a major cost driver",
+        category: "Payroll",
+        severity: payrollShare > 0.6 ? "Medium" : "Low",
+        summary: `${latestPayrollMonth} payroll is ${formatCurrency(payrollCost)}, representing ${formatPercentVarianceLabel(payrollShare).replace("+", "")} of current operating expenses.`,
+        whyItMatters:
+          "Payroll is usually the largest fixed cost in a software company and has a direct impact on burn and runway.",
+        recommendedAction:
+          "Tie hiring approvals to runway, revenue conversion, and forecast capacity before adding fixed headcount.",
+        sourceMetrics: [
+          `Headcount: ${latestPayrollRows.length}`,
+          `Monthly payroll cost: ${formatCurrency(payrollCost)}`,
+        ],
+      });
+    }
+  }
+
+  if (revenueRows.length > 0) {
+    const revenueByCustomer = sumByString(revenueRows, "customer", "amount");
+    const totalRevenue = [...revenueByCustomer.values()].reduce(
+      (total, value) => total + value,
+      0,
+    );
+    const topCustomer = [...revenueByCustomer.entries()].sort(
+      (first, second) => second[1] - first[1],
+    )[0];
+
+    if (topCustomer && totalRevenue > 0 && topCustomer[1] / totalRevenue > 0.3) {
+      insights.push({
+        id: "customer-concentration-risk",
+        title: "Customer concentration is elevated",
+        category: "Revenue",
+        severity: topCustomer[1] / totalRevenue > 0.5 ? "High" : "Medium",
+        summary: `${topCustomer[0]} represents ${formatPercentVarianceLabel(topCustomer[1] / totalRevenue).replace("+", "")} of uploaded revenue detail.`,
+        whyItMatters:
+          "High customer concentration can increase renewal, collections, and investor diligence risk.",
+        recommendedAction:
+          "Prepare investor language on customer quality, retention, expansion, and diversification plans.",
+        sourceMetrics: [
+          `Top customer revenue: ${formatCurrency(topCustomer[1])}`,
+          `Uploaded revenue detail: ${formatCurrency(totalRevenue)}`,
+        ],
+      });
+    }
+  }
+
+  if (pipelineRows.length > 0) {
+    const totalPipeline = pipelineRows.reduce(
+      (total, row) => total + (row.amount ?? 0),
+      0,
+    );
+    const weightedPipeline = pipelineRows.reduce(
+      (total, row) => total + (row.weightedPipeline ?? 0),
+      0,
+    );
+    const futureRevenueTarget =
+      activeForecast.periods.slice(0, 3).reduce((total, row) => total + row.revenue, 0) ||
+      (latestForecastMonth?.revenue ?? actual.revenue) * 3;
+    const coverage = futureRevenueTarget > 0 ? weightedPipeline / futureRevenueTarget : 0;
+
+    if (coverage < 0.8) {
+      insights.push({
+        id: "pipeline-coverage-risk",
+        title: "Pipeline coverage looks light",
+        category: "Pipeline",
+        severity: coverage < 0.5 ? "High" : "Medium",
+        summary: `Weighted pipeline is ${formatCurrency(weightedPipeline)} versus the next revenue coverage target of ${formatCurrency(futureRevenueTarget)}.`,
+        whyItMatters:
+          "Weak weighted pipeline can make future revenue forecasts difficult to achieve.",
+        recommendedAction:
+          "Review deal timing, stage probability, conversion assumptions, and whether the forecast should be updated.",
+        sourceMetrics: [
+          `Total pipeline: ${formatCurrency(totalPipeline)}`,
+          `Weighted pipeline: ${formatCurrency(weightedPipeline)}`,
+          `Coverage: ${(coverage * 100).toFixed(1)}%`,
+        ],
+      });
+    }
+  }
+
+  if (bankRows.length > 0) {
+    const outflowsByCategory = sumBankOutflowsByCategory(bankRows);
+    const topOutflow = [...outflowsByCategory.entries()].sort(
+      (first, second) => second[1] - first[1],
+    )[0];
+
+    if (topOutflow) {
+      insights.push({
+        id: "largest-bank-outflow-category",
+        title: "Largest cash outflow category identified",
+        category: "Banking",
+        severity: "Low",
+        summary: `${topOutflow[0]} is the largest uploaded bank outflow category at ${formatCurrency(topOutflow[1])}.`,
+        whyItMatters:
+          "Bank transaction detail helps explain the cash movement behind burn and runway.",
+        recommendedAction:
+          "Review the largest outflow categories for timing, vendor commitments, and possible savings.",
+        sourceMetrics: [
+          `Top outflow category: ${topOutflow[0]}`,
+          `Outflow amount: ${formatCurrency(topOutflow[1])}`,
+        ],
       });
     }
   }
@@ -740,4 +904,39 @@ function formatMonthVariance(value: number) {
   const prefix = value >= 0 ? "+" : "-";
 
   return `${prefix}${Math.abs(value).toFixed(1)} months`;
+}
+
+function sumByString<T extends Record<string, unknown>>(
+  rows: T[],
+  key: keyof T,
+  valueKey: keyof T,
+) {
+  const totals = new Map<string, number>();
+
+  rows.forEach((row) => {
+    const label = String(row[key] ?? "Unknown");
+    const value = typeof row[valueKey] === "number" ? row[valueKey] : 0;
+
+    totals.set(label, (totals.get(label) ?? 0) + value);
+  });
+
+  return totals;
+}
+
+function sumBankOutflowsByCategory(
+  rows: { category: string; amount: number | null }[],
+) {
+  const totals = new Map<string, number>();
+
+  rows.forEach((row) => {
+    const amount = row.amount ?? 0;
+
+    if (amount >= 0) {
+      return;
+    }
+
+    totals.set(row.category, (totals.get(row.category) ?? 0) + Math.abs(amount));
+  });
+
+  return totals;
 }

@@ -26,6 +26,10 @@ import {
   getCashMetricsForMonth,
   getCashSourceLabel,
   getBudgetForMonth,
+  getUploadedBankTransactions,
+  getUploadedPayroll,
+  getUploadedPipeline,
+  getUploadedRevenueDetail,
   type ActiveBudgetData,
   type ActiveCashData,
   type ActiveFinancialData,
@@ -75,6 +79,7 @@ export function CFOBrief() {
     () => buildBriefForMonth(generatedMonth),
     [generatedMonth],
   );
+  const uploadedDataNotes = buildUploadedDataNotes();
 
   async function handleDeckGeneration() {
     const deckMonth = selectedMonth;
@@ -269,6 +274,8 @@ export function CFOBrief() {
           items={brief.investorBullets}
         />
       </div>
+
+      <BriefSection title="Uploaded Operating Data" items={uploadedDataNotes} />
     </section>
   );
 }
@@ -558,6 +565,28 @@ function buildRisks({
   }
 
   return risks.slice(0, 5);
+}
+
+function buildUploadedDataNotes() {
+  const payrollRows = getUploadedPayroll();
+  const revenueRows = getUploadedRevenueDetail();
+  const pipelineRows = getUploadedPipeline();
+  const bankRows = getUploadedBankTransactions();
+
+  return [
+    payrollRows.length > 0
+      ? `Payroll data uploaded: ${payrollRows.length} rows available for headcount and payroll cost commentary.`
+      : "Payroll data not uploaded.",
+    revenueRows.length > 0
+      ? `Revenue detail uploaded: ${revenueRows.length} rows available for customer concentration review.`
+      : "Revenue detail not uploaded.",
+    pipelineRows.length > 0
+      ? `Pipeline data uploaded: ${pipelineRows.length} rows available for forecast coverage review.`
+      : "Pipeline data not uploaded.",
+    bankRows.length > 0
+      ? `Bank transactions uploaded: ${bankRows.length} rows available for cash outflow review.`
+      : "Bank transactions not uploaded.",
+  ];
 }
 
 function formatValue(value: number, format: "currency" | "percent" | "months") {

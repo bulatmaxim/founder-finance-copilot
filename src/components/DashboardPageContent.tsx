@@ -31,6 +31,7 @@ import {
   getBudgetForMonth,
   getCashMetricsForMonth,
   getCashSourceLabel,
+  getUploadedPayroll,
   type ActiveFinancialData,
   type ActiveBudgetData,
   type ActiveCashData,
@@ -89,6 +90,17 @@ export function DashboardPageContent() {
   const actualsSourceLabel = getActualsSourceLabel(activeData.dataSource);
   const budgetSourceLabel = getBudgetSourceLabel(activeBudget.dataSource);
   const cashSourceLabel = getCashSourceLabel(activeCash.dataSource);
+  const uploadedPayroll = getUploadedPayroll();
+  const latestPayrollMonth = [...new Set(uploadedPayroll.map((row) => row.month))]
+    .sort()
+    .at(-1);
+  const latestPayrollRows = uploadedPayroll.filter(
+    (row) => row.month === latestPayrollMonth && row.status !== "Error",
+  );
+  const monthlyPayrollCost = latestPayrollRows.reduce(
+    (total, row) => total + (row.totalMonthlyPayrollCost ?? 0),
+    0,
+  );
 
   const metrics = [
     {
@@ -129,6 +141,20 @@ export function DashboardPageContent() {
       value: formatRunwayMonths(runwayMonths),
       context: "Cash divided by 3-month average burn where available",
     },
+    ...(latestPayrollRows.length > 0
+      ? [
+          {
+            label: "Headcount",
+            value: String(latestPayrollRows.length),
+            context: `${latestPayrollMonth} uploaded payroll`,
+          },
+          {
+            label: "Payroll Cost",
+            value: formatCurrency(monthlyPayrollCost),
+            context: "Monthly payroll from uploaded payroll",
+          },
+        ]
+      : []),
   ];
 
   const trendData = activeFinancials.map((month) => ({

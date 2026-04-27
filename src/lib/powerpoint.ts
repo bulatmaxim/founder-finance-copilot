@@ -26,6 +26,10 @@ import {
   getBudgetSourceLabel,
   getCashMetricsForMonth,
   getCashSourceLabel,
+  getUploadedBankTransactions,
+  getUploadedPayroll,
+  getUploadedPipeline,
+  getUploadedRevenueDetail,
 } from "@/lib/localDataStore";
 import type { FinancialPeriod } from "@/lib/calculations";
 
@@ -213,6 +217,7 @@ function buildDeckContext(
   const budgetSummary = summarizeForecast(budgetVersion);
   const latestSummary = summarizeForecast(latestForecast);
   const metricRows = buildMetricRows(actual, budget);
+  const uploadedDataNotes = buildUploadedDataNotes();
 
   return {
     reportingMonth,
@@ -229,6 +234,7 @@ function buildDeckContext(
     budgetSummary,
     latestSummary,
     forecastCommentary: buildForecastCommentary(budgetSummary, latestSummary),
+    uploadedDataNotes,
   };
 }
 
@@ -536,6 +542,7 @@ function addAppendixSlide(
       context.activeCash.dataSource === "uploaded"
         ? ["Uploaded actuals, budget, and cash CSV data are stored locally in the browser for prototype testing only."]
         : []),
+      ...context.uploadedDataNotes,
       "Favorable variance logic: higher is favorable for revenue, margin, EBITDA, cash, and runway; lower is favorable for expenses and net burn.",
       "No external accounting, banking, payroll, CRM, AI, or database service is connected.",
     ],
@@ -544,6 +551,28 @@ function addAppendixSlide(
     11.4,
     4.8,
   );
+}
+
+function buildUploadedDataNotes() {
+  const payrollRows = getUploadedPayroll();
+  const revenueRows = getUploadedRevenueDetail();
+  const pipelineRows = getUploadedPipeline();
+  const bankRows = getUploadedBankTransactions();
+
+  return [
+    payrollRows.length > 0
+      ? `Payroll/headcount data uploaded: ${payrollRows.length} rows.`
+      : "Payroll data not uploaded.",
+    revenueRows.length > 0
+      ? `Revenue detail uploaded: ${revenueRows.length} rows for concentration review.`
+      : "Revenue detail not uploaded.",
+    pipelineRows.length > 0
+      ? `Pipeline data uploaded: ${pipelineRows.length} rows for forecast coverage review.`
+      : "Pipeline data not uploaded.",
+    bankRows.length > 0
+      ? `Bank transaction data uploaded: ${bankRows.length} rows for cash outflow review.`
+      : "Bank transactions not uploaded.",
+  ];
 }
 
 function addSlideShell(

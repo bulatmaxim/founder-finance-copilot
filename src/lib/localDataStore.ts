@@ -8,7 +8,15 @@ import {
   estimateCashOutDate,
   type FinancialPeriod,
 } from "@/lib/calculations";
-import type { UploadedCashRow, UploadedFinancialRow } from "@/types/financial";
+import type {
+  UploadedBankTransactionRow,
+  UploadedCashRow,
+  UploadedFinancialRow,
+  UploadedForecastRow,
+  UploadedPayrollRow,
+  UploadedPipelineRow,
+  UploadedRevenueDetailRow,
+} from "@/types/financial";
 
 export type DataSourceMode = "sample" | "uploaded";
 
@@ -24,6 +32,31 @@ export type UploadedBudgetPayload = {
 
 export type UploadedCashPayload = {
   rows: UploadedCashRow[];
+  savedAt: string;
+};
+
+export type UploadedPayrollPayload = {
+  rows: UploadedPayrollRow[];
+  savedAt: string;
+};
+
+export type UploadedRevenueDetailPayload = {
+  rows: UploadedRevenueDetailRow[];
+  savedAt: string;
+};
+
+export type UploadedPipelinePayload = {
+  rows: UploadedPipelineRow[];
+  savedAt: string;
+};
+
+export type UploadedBankTransactionsPayload = {
+  rows: UploadedBankTransactionRow[];
+  savedAt: string;
+};
+
+export type UploadedForecastPayload = {
+  rows: UploadedForecastRow[];
   savedAt: string;
 };
 
@@ -76,9 +109,25 @@ export type ActiveCashData = {
   totalCashChange: number;
 };
 
+export type ActiveForecastData = {
+  periods: FinancialPeriod[];
+  dataSource: DataSourceMode;
+  uploadedRows: UploadedForecastRow[];
+  savedAt: string | null;
+  warnings: string[];
+  errors: string[];
+  forecastVersion: string;
+};
+
 const uploadedActualsKey = "founder-finance-copilot:uploaded-actuals";
 const uploadedBudgetKey = "founder-finance-copilot:uploaded-budget";
 const uploadedCashKey = "founder-finance-copilot:uploaded-cash";
+const uploadedPayrollKey = "founder-finance-copilot:uploaded-payroll";
+const uploadedRevenueDetailKey = "founder-finance-copilot:uploaded-revenue-detail";
+const uploadedPipelineKey = "founder-finance-copilot:uploaded-pipeline";
+const uploadedBankTransactionsKey =
+  "founder-finance-copilot:uploaded-bank-transactions";
+const uploadedForecastKey = "founder-finance-copilot:uploaded-forecast";
 
 export function saveUploadedActuals(rows: UploadedFinancialRow[]) {
   if (!canUseLocalStorage()) {
@@ -257,6 +306,108 @@ export function hasUploadedCash() {
   return getUploadedCash().length > 0;
 }
 
+export function saveUploadedPayroll(rows: UploadedPayrollRow[]) {
+  saveUploadedRows(uploadedPayrollKey, rows);
+}
+
+export function getUploadedPayroll() {
+  return getUploadedPayrollPayload()?.rows ?? [];
+}
+
+export function getUploadedPayrollPayload(): UploadedPayrollPayload | null {
+  return getUploadedRowsPayload<UploadedPayrollRow>(uploadedPayrollKey);
+}
+
+export function clearUploadedPayroll() {
+  clearUploadedRows(uploadedPayrollKey);
+}
+
+export function hasUploadedPayroll() {
+  return getUploadedPayroll().length > 0;
+}
+
+export function saveUploadedRevenueDetail(rows: UploadedRevenueDetailRow[]) {
+  saveUploadedRows(uploadedRevenueDetailKey, rows);
+}
+
+export function getUploadedRevenueDetail() {
+  return getUploadedRevenueDetailPayload()?.rows ?? [];
+}
+
+export function getUploadedRevenueDetailPayload(): UploadedRevenueDetailPayload | null {
+  return getUploadedRowsPayload<UploadedRevenueDetailRow>(uploadedRevenueDetailKey);
+}
+
+export function clearUploadedRevenueDetail() {
+  clearUploadedRows(uploadedRevenueDetailKey);
+}
+
+export function hasUploadedRevenueDetail() {
+  return getUploadedRevenueDetail().length > 0;
+}
+
+export function saveUploadedPipeline(rows: UploadedPipelineRow[]) {
+  saveUploadedRows(uploadedPipelineKey, rows);
+}
+
+export function getUploadedPipeline() {
+  return getUploadedPipelinePayload()?.rows ?? [];
+}
+
+export function getUploadedPipelinePayload(): UploadedPipelinePayload | null {
+  return getUploadedRowsPayload<UploadedPipelineRow>(uploadedPipelineKey);
+}
+
+export function clearUploadedPipeline() {
+  clearUploadedRows(uploadedPipelineKey);
+}
+
+export function hasUploadedPipeline() {
+  return getUploadedPipeline().length > 0;
+}
+
+export function saveUploadedBankTransactions(rows: UploadedBankTransactionRow[]) {
+  saveUploadedRows(uploadedBankTransactionsKey, rows);
+}
+
+export function getUploadedBankTransactions() {
+  return getUploadedBankTransactionsPayload()?.rows ?? [];
+}
+
+export function getUploadedBankTransactionsPayload(): UploadedBankTransactionsPayload | null {
+  return getUploadedRowsPayload<UploadedBankTransactionRow>(
+    uploadedBankTransactionsKey,
+  );
+}
+
+export function clearUploadedBankTransactions() {
+  clearUploadedRows(uploadedBankTransactionsKey);
+}
+
+export function hasUploadedBankTransactions() {
+  return getUploadedBankTransactions().length > 0;
+}
+
+export function saveUploadedForecast(rows: UploadedForecastRow[]) {
+  saveUploadedRows(uploadedForecastKey, rows);
+}
+
+export function getUploadedForecast() {
+  return getUploadedForecastPayload()?.rows ?? [];
+}
+
+export function getUploadedForecastPayload(): UploadedForecastPayload | null {
+  return getUploadedRowsPayload<UploadedForecastRow>(uploadedForecastKey);
+}
+
+export function clearUploadedForecast() {
+  clearUploadedRows(uploadedForecastKey);
+}
+
+export function hasUploadedForecast() {
+  return getUploadedForecast().length > 0;
+}
+
 export function getActiveFinancialData(): ActiveFinancialData {
   const payload = getUploadedActualsPayload();
   const activeCash = getActiveCashData();
@@ -344,6 +495,71 @@ export function getCashMetricsForMonth(month: string) {
     activeCash.periods[activeCash.periods.length - 1] ??
     null
   );
+}
+
+export function getActiveForecastData(): ActiveForecastData {
+  const payload = getUploadedForecastPayload();
+
+  if (!payload || payload.rows.length === 0) {
+    return {
+      periods: [],
+      dataSource: "sample",
+      uploadedRows: [],
+      savedAt: null,
+      warnings: [],
+      errors: [],
+      forecastVersion: "Sample Forecast",
+    };
+  }
+
+  const forecastVersion = chooseForecastVersion(payload.rows);
+  const selectedRows = payload.rows.filter(
+    (row) => row.forecastVersion === forecastVersion,
+  );
+  const converted = convertUploadedRowsToFinancialPeriods(
+    selectedRows.map((row) => ({
+      rowNumber: row.rowNumber,
+      month: row.month,
+      account: row.account,
+      category: row.category,
+      amountRaw: row.amountRaw,
+      amount: row.amount,
+      status: row.status,
+      messages: row.messages,
+    })),
+    "budget",
+  );
+
+  if (converted.periods.length === 0 || converted.errors.length > 0) {
+    return {
+      periods: [],
+      dataSource: "sample",
+      uploadedRows: payload.rows,
+      savedAt: payload.savedAt,
+      warnings: [
+        ...converted.warnings,
+        "Uploaded forecast CSV data could not be converted into monthly forecast summaries. Falling back to sample forecast data.",
+      ],
+      errors: converted.errors,
+      forecastVersion,
+    };
+  }
+
+  return {
+    periods: converted.periods,
+    dataSource: "uploaded",
+    uploadedRows: payload.rows,
+    savedAt: payload.savedAt,
+    warnings: converted.warnings,
+    errors: [],
+    forecastVersion,
+  };
+}
+
+export function getForecastSourceLabel(dataSource: DataSourceMode) {
+  return dataSource === "uploaded"
+    ? "Forecast Source: Uploaded Forecast CSV"
+    : "Forecast Source: Sample Forecast";
 }
 
 function applyCashDataToActiveFinancialData(
@@ -813,6 +1029,78 @@ function average(values: number[]) {
   }
 
   return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function saveUploadedRows<T>(key: string, rows: T[]) {
+  if (!canUseLocalStorage()) {
+    return;
+  }
+
+  window.localStorage.setItem(
+    key,
+    JSON.stringify({
+      rows,
+      savedAt: new Date().toISOString(),
+    }),
+  );
+}
+
+function getUploadedRowsPayload<T>(
+  key: string,
+): { rows: T[]; savedAt: string } | null {
+  if (!canUseLocalStorage()) {
+    return null;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(key);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<{
+      rows: T[];
+      savedAt: string;
+    }>;
+
+    if (!Array.isArray(parsed.rows)) {
+      clearUploadedRows(key);
+      return null;
+    }
+
+    return {
+      rows: parsed.rows,
+      savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : "",
+    };
+  } catch (error) {
+    console.error(`Failed to read uploaded rows from localStorage key ${key}`, error);
+    clearUploadedRows(key);
+    return null;
+  }
+}
+
+function clearUploadedRows(key: string) {
+  if (!canUseLocalStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem(key);
+}
+
+function chooseForecastVersion(rows: UploadedForecastRow[]) {
+  const counts = new Map<string, number>();
+
+  rows
+    .filter((row) => row.status !== "Error" && row.forecastVersion)
+    .forEach((row) => {
+      counts.set(row.forecastVersion, (counts.get(row.forecastVersion) ?? 0) + 1);
+    });
+
+  return (
+    [...counts.entries()].sort((first, second) => second[1] - first[1])[0]?.[0] ??
+    "Uploaded Forecast"
+  );
 }
 
 function canUseLocalStorage() {

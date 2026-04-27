@@ -25,12 +25,15 @@ import {
 import {
   getActiveBudgetData,
   getActiveCashData,
+  getActiveForecastData,
   getActiveFinancialData,
   getActualsSourceLabel,
   getBudgetSourceLabel,
   getCashSourceLabel,
+  getForecastSourceLabel,
   type ActiveBudgetData,
   type ActiveCashData,
+  type ActiveForecastData,
   type ActiveFinancialData,
 } from "@/lib/localDataStore";
 
@@ -105,6 +108,9 @@ export default function ForecastsPage() {
   );
   const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
   const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
+  const [activeForecast] = useState<ActiveForecastData>(() =>
+    getActiveForecastData(),
+  );
 
   const selectedVersion = useMemo(
     () =>
@@ -172,11 +178,13 @@ export default function ForecastsPage() {
             <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
             <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
             <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
+            <DataSourceBadge label={getForecastSourceLabel(activeForecast.dataSource)} />
             {activeBudget.dataSource === "uploaded" ||
-            activeCash.dataSource === "uploaded" ? (
+            activeCash.dataSource === "uploaded" ||
+            activeForecast.dataSource === "uploaded" ? (
               <p className="text-sm text-neutral-500">
-                Uploaded budget or cash data is active for local comparisons.
-                Forecast versions still use sample forecast data for now.
+                Uploaded planning data is active for local comparisons. Sample
+                scenarios remain available for reference.
               </p>
             ) : null}
           </div>
@@ -218,6 +226,10 @@ export default function ForecastsPage() {
         <div className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
           {notice}
         </div>
+      ) : null}
+
+      {activeForecast.dataSource === "uploaded" ? (
+        <UploadedForecastSummary activeForecast={activeForecast} />
       ) : null}
 
       <section className="rounded-md border border-neutral-200 bg-white p-5">
@@ -367,6 +379,46 @@ function ForecastTable({ version }: { version: ForecastVersion }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+}
+
+function UploadedForecastSummary({
+  activeForecast,
+}: {
+  activeForecast: ActiveForecastData;
+}) {
+  const revenue = activeForecast.periods.reduce(
+    (total, period) => total + period.revenue,
+    0,
+  );
+  const operatingExpenses = activeForecast.periods.reduce(
+    (total, period) => total + period.operatingExpenses,
+    0,
+  );
+  const ebitda = activeForecast.periods.reduce(
+    (total, period) => total + period.ebitda,
+    0,
+  );
+  const endingCash =
+    activeForecast.periods[activeForecast.periods.length - 1]?.cashBalance ?? 0;
+
+  return (
+    <section className="rounded-md border border-neutral-200 bg-white p-5">
+      <h2 className="text-base font-semibold">Uploaded Forecast Active</h2>
+      <p className="mt-1 text-sm text-neutral-500">
+        {activeForecast.forecastVersion} is loaded from local CSV and available
+        to Finance Copilot for forecast update checks.
+      </p>
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard label="Forecast revenue" value={formatCurrency(revenue)} />
+        <SummaryCard
+          label="Forecast OpEx"
+          value={formatCurrency(operatingExpenses)}
+        />
+        <SummaryCard label="Forecast EBITDA" value={formatCurrency(ebitda)} />
+        <SummaryCard label="Ending cash" value={formatCurrency(endingCash)} />
       </div>
     </section>
   );
