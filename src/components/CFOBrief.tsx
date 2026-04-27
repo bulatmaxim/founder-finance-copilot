@@ -18,9 +18,12 @@ import {
 } from "@/lib/formatting";
 import { generateFinanceInsights } from "@/lib/financeInsights";
 import {
+  getActiveBudgetData,
   getActiveFinancialData,
+  getActualsSourceLabel,
+  getBudgetSourceLabel,
   getBudgetForMonth,
-  getDataSourceLabel,
+  type ActiveBudgetData,
   type ActiveFinancialData,
 } from "@/lib/localDataStore";
 import { generateMonthlyCfoDeck } from "@/lib/powerpoint";
@@ -55,6 +58,7 @@ export function CFOBrief() {
   const [activeData] = useState<ActiveFinancialData>(() =>
     getActiveFinancialData(),
   );
+  const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
   const [selectedMonth, setSelectedMonth] = useState(
     activeData.periods[activeData.periods.length - 1].month,
   );
@@ -108,12 +112,13 @@ export function CFOBrief() {
             active local actuals and budget data only.
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <DataSourceBadge label={getDataSourceLabel(activeData.dataSource)} />
-            {activeData.dataSource === "uploaded" ? (
+            <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
+            <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
+            {activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded" ? (
               <p className="text-sm text-neutral-500">
-                Uploaded CSV data is stored locally in your browser for
-                prototype testing only. Cash and runway still use sample
-                assumptions.
+                Uploaded actuals and budget data are stored locally in your
+                browser for prototype testing only. They are not saved to a
+                database yet.
               </p>
             ) : null}
           </div>

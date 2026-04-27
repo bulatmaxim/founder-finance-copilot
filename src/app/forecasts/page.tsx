@@ -22,6 +22,14 @@ import {
   formatRunwayMonths,
   formatVarianceLabel,
 } from "@/lib/formatting";
+import {
+  getActiveBudgetData,
+  getActiveFinancialData,
+  getActualsSourceLabel,
+  getBudgetSourceLabel,
+  type ActiveBudgetData,
+  type ActiveFinancialData,
+} from "@/lib/localDataStore";
 
 type ForecastMetricKey =
   | "revenue"
@@ -89,6 +97,10 @@ export default function ForecastsPage() {
   const [selectedVersionId, setSelectedVersionId] =
     useState<ForecastVersionId>("latest");
   const [notice, setNotice] = useState("");
+  const [activeData] = useState<ActiveFinancialData>(() =>
+    getActiveFinancialData(),
+  );
+  const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
 
   const selectedVersion = useMemo(
     () =>
@@ -152,6 +164,16 @@ export default function ForecastsPage() {
             Compare Acme AI budget, latest forecast, rolling forecast versions,
             and planning cases using local sample data.
           </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
+            <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
+            {activeBudget.dataSource === "uploaded" ? (
+              <p className="text-sm text-neutral-500">
+                Uploaded budget data is active for budget comparisons. Forecast
+                versions still use sample forecast data for now.
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -580,6 +602,14 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
       <p className="text-sm font-medium text-neutral-500">{label}</p>
       <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
     </article>
+  );
+}
+
+function DataSourceBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+      {label}
+    </span>
   );
 }
 

@@ -25,7 +25,41 @@ export const pnlActualsSampleCsv = [
   "2026-02,Gusto Payroll,Payroll,-87000",
 ].join("\n");
 
+export const budgetSampleCsv = [
+  "month,account,category,amount",
+  ...Array.from({ length: 12 }, (_, index) => {
+    const month = `2026-${String(index + 1).padStart(2, "0")}`;
+    const revenue = 125000 + index * 14500;
+    const hosting = -(17000 + index * 1200);
+    const payroll = -(82000 + index * 3500);
+    const software = -(12000 + index * 450);
+    const professionalServices = -(9000 + index * 250);
+    const salesMarketing = -(36000 + index * 1800);
+    const researchDevelopment = -(52000 + index * 2200);
+    const generalAdministrative = -(26000 + index * 900);
+
+    return [
+      `${month},Subscription Revenue,Revenue,${revenue}`,
+      `${month},AWS Hosting,Cloud Hosting,${hosting}`,
+      `${month},Gusto Payroll,Payroll,${payroll}`,
+      `${month},SaaS Tools,Software,${software}`,
+      `${month},Legal and Accounting,Professional Services,${professionalServices}`,
+      `${month},Demand Generation,Sales & Marketing,${salesMarketing}`,
+      `${month},Engineering Team,Research & Development,${researchDevelopment}`,
+      `${month},Operations Team,General & Administrative,${generalAdministrative}`,
+    ].join("\n");
+  }),
+].join("\n");
+
 export function parsePnlActualsCsv(csvText: string): ParsedFinancialCsv {
+  return parseFinancialCsv(csvText);
+}
+
+export function parseBudgetCsv(csvText: string): ParsedFinancialCsv {
+  return parseFinancialCsv(csvText);
+}
+
+function parseFinancialCsv(csvText: string): ParsedFinancialCsv {
   const parsed = Papa.parse<RawFinancialCsvRow>(csvText, {
     header: true,
     skipEmptyLines: "greedy",

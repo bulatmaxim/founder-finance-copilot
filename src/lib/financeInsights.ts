@@ -12,9 +12,11 @@ import {
   formatVarianceLabel,
 } from "@/lib/formatting";
 import {
+  getActiveBudgetData,
   getActiveFinancialData,
+  getActualsSourceLabel,
+  getBudgetSourceLabel,
   getBudgetForMonth,
-  getDataSourceLabel,
 } from "@/lib/localDataStore";
 import type { UploadedFinancialRow } from "@/types/financial";
 
@@ -62,7 +64,8 @@ export type FinanceInsightResult = {
   managementQuestions: string[];
   recommendedActions: string[];
   dataQualityInsights: FinanceInsight[];
-  dataSource: string;
+  actualsSource: string;
+  budgetSource: string;
   dataWarnings: string[];
 };
 
@@ -106,8 +109,9 @@ export function generateFinanceInsights(
     managementQuestions: generateManagementQuestions(options),
     recommendedActions: generateRecommendedActions(options),
     dataQualityInsights,
-    dataSource: getDataSourceLabel(context.activeData.dataSource),
-    dataWarnings: context.activeData.warnings,
+    actualsSource: getActualsSourceLabel(context.activeData.dataSource),
+    budgetSource: getBudgetSourceLabel(context.activeBudget.dataSource),
+    dataWarnings: [...context.activeData.warnings, ...context.activeBudget.warnings],
   };
 }
 
@@ -135,7 +139,7 @@ export function generateRunwayWarnings(
         `Budget runway: ${formatRunwayMonths(budget.runwayMonths)}`,
         `Cash: ${formatCurrency(actual.cashBalance)}`,
         `Net burn: ${formatCurrency(actual.netBurn)}`,
-        getDataSourceLabel(activeData.dataSource),
+        getActualsSourceLabel(activeData.dataSource),
       ],
     });
   } else if (actual.runwayMonths < budget.runwayMonths) {
@@ -161,7 +165,7 @@ export function generateRunwayWarnings(
 export function generateVarianceInsights(
   options: FinanceInsightOptions = {},
 ): FinanceInsight[] {
-  const { actual, budget, priorActual, activeData } = getInsightContext(
+  const { actual, budget, priorActual, activeData, activeBudget } = getInsightContext(
     options.reportingMonth,
   );
   const insights: FinanceInsight[] = [];
@@ -196,7 +200,7 @@ export function generateVarianceInsights(
         `Actual revenue: ${formatCurrency(actual.revenue)}`,
         `Budget revenue: ${formatCurrency(budget.revenue)}`,
         `Variance: ${formatVarianceLabel(revenueVariance)}`,
-        getDataSourceLabel(activeData.dataSource),
+        getActualsSourceLabel(activeData.dataSource),
       ],
     });
   } else if (revenueVariance > 0) {
@@ -213,7 +217,7 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `Actual revenue: ${formatCurrency(actual.revenue)}`,
         `Budget revenue: ${formatCurrency(budget.revenue)}`,
-        getDataSourceLabel(activeData.dataSource),
+        getActualsSourceLabel(activeData.dataSource),
       ],
     });
   }
@@ -232,7 +236,8 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `Actual OpEx: ${formatCurrency(actual.operatingExpenses)}`,
         `Budget OpEx: ${formatCurrency(budget.operatingExpenses)}`,
-        getDataSourceLabel(activeData.dataSource),
+        getActualsSourceLabel(activeData.dataSource),
+        getBudgetSourceLabel(activeBudget.dataSource),
       ],
     });
   }
@@ -262,7 +267,8 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `Actual EBITDA: ${formatCurrency(actual.ebitda)}`,
         `Budget EBITDA: ${formatCurrency(budget.ebitda)}`,
-        getDataSourceLabel(activeData.dataSource),
+        getActualsSourceLabel(activeData.dataSource),
+        getBudgetSourceLabel(activeBudget.dataSource),
       ],
     });
   }
@@ -285,7 +291,7 @@ export function generateVarianceInsights(
         `${actual.month} cash: ${formatCurrency(actual.cashBalance)}`,
         activeData.dataSource === "uploaded"
           ? "Cash uses sample assumption"
-          : getDataSourceLabel(activeData.dataSource),
+          : getActualsSourceLabel(activeData.dataSource),
       ],
     });
   }
@@ -304,7 +310,8 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `Actual net burn: ${formatCurrency(actual.netBurn)}`,
         `Budget net burn: ${formatCurrency(budget.netBurn)}`,
-        getDataSourceLabel(activeData.dataSource),
+        getActualsSourceLabel(activeData.dataSource),
+        getBudgetSourceLabel(activeBudget.dataSource),
       ],
     });
   }
@@ -435,7 +442,7 @@ export function generateRecommendedActions(
 }
 
 export function generateFounderSummary(options: FinanceInsightOptions = {}) {
-  const { actual, budget, priorActual, activeData } = getInsightContext(
+  const { actual, budget, priorActual, activeData, activeBudget } = getInsightContext(
     options.reportingMonth,
   );
   const revenueVariance = actual.revenue - budget.revenue;
@@ -458,9 +465,9 @@ export function generateFounderSummary(options: FinanceInsightOptions = {}) {
     : `cash ended at ${formatCurrency(actual.cashBalance)}`;
 
   const sourcePhrase =
-    activeData.dataSource === "uploaded"
-      ? "This analysis uses uploaded CSV P&L actuals; cash and runway remain sample assumptions until cash upload is built."
-      : "This analysis uses local sample financial data.";
+    activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded"
+      ? `This analysis uses ${getActualsSourceLabel(activeData.dataSource).replace("Actuals Source: ", "").toLowerCase()} and ${getBudgetSourceLabel(activeBudget.dataSource).replace("Budget Source: ", "").toLowerCase()}; cash and runway remain sample assumptions until cash upload is built.`
+      : "This analysis uses local sample financial data and sample budget data.";
 
   return `${sampleCompany.name} closed ${actual.month} with ${revenuePhrase}, ${spendPhrase}, and EBITDA ${ebitdaVariance >= 0 ? "ahead of" : "below"} plan by ${formatVarianceLabel(ebitdaVariance)}. ${cashPhrase}, ending with ${formatRunwayMonths(actual.runwayMonths)} of runway. ${forecastRecommendation.shouldUpdate ? "Management should refresh the latest forecast and tighten the investor narrative around the main variance drivers." : "Management can maintain the current forecast posture while continuing to monitor burn and pipeline quality."} ${sourcePhrase}`;
 }
@@ -470,21 +477,22 @@ export function generateDataQualityInsights(
 ): FinanceInsight[] {
   const insights: FinanceInsight[] = [];
   const activeData = getActiveFinancialData();
+  const activeBudget = getActiveBudgetData();
 
-  if (activeData.dataSource === "uploaded") {
+  if (activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded") {
     insights.push({
       id: "uploaded-data-active",
       title: "Uploaded CSV data is active",
       category: "Data Quality",
       severity: "Low",
-      summary:
-        "The finance copilot is using uploaded P&L actuals stored locally in the browser.",
+      summary: `The finance copilot is using ${getActualsSourceLabel(activeData.dataSource).replace("Actuals Source: ", "").toLowerCase()} and ${getBudgetSourceLabel(activeBudget.dataSource).replace("Budget Source: ", "").toLowerCase()}.`,
       whyItMatters:
         "This proves the local prototype can analyze user-provided actuals without a database or external integrations.",
       recommendedAction:
         "Add persistent database storage and formal account mapping before production use.",
       sourceMetrics: [
         `Uploaded rows: ${activeData.uploadedRows.length}`,
+        `Uploaded budget rows: ${activeBudget.uploadedRows.length}`,
         "Cash and runway use sample assumptions",
       ],
     });
@@ -592,6 +600,7 @@ function buildForecastInsights(
 
 function getInsightContext(reportingMonth?: string) {
   const activeData = getActiveFinancialData();
+  const activeBudget = getActiveBudgetData();
   const periods = activeData.periods.length > 0 ? activeData.periods : sampleFinancials;
   const month = reportingMonth ?? periods[periods.length - 1].month;
   const index = periods.findIndex((period) => period.month === month);
@@ -611,6 +620,7 @@ function getInsightContext(reportingMonth?: string) {
     latestForecast,
     latestForecastMonth,
     activeData,
+    activeBudget,
   };
 }
 

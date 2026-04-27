@@ -18,9 +18,12 @@ import {
   formatVarianceLabel,
 } from "@/lib/formatting";
 import {
+  getActiveBudgetData,
   getActiveFinancialData,
+  getActualsSourceLabel,
+  getBudgetSourceLabel,
   getBudgetForMonth,
-  getDataSourceLabel,
+  type ActiveBudgetData,
   type ActiveFinancialData,
 } from "@/lib/localDataStore";
 
@@ -141,6 +144,7 @@ export default function BudgetVsActualsPage() {
   const [activeData] = useState<ActiveFinancialData>(() =>
     getActiveFinancialData(),
   );
+  const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [selectedMonth, setSelectedMonth] = useState(
     activeData.periods[activeData.periods.length - 1].month,
@@ -229,12 +233,13 @@ export default function BudgetVsActualsPage() {
             year-to-date.
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <DataSourceBadge label={getDataSourceLabel(activeData.dataSource)} />
-            {activeData.dataSource === "uploaded" ? (
+            <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
+            <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
+            {activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded" ? (
               <p className="text-sm text-neutral-500">
-                Uploaded CSV data is stored locally in your browser for
-                prototype testing only. Cash and runway still use sample
-                assumptions.
+                Uploaded actuals and budget data are stored locally in your
+                browser for prototype testing only. They are not saved to a
+                database yet.
               </p>
             ) : null}
           </div>
@@ -290,11 +295,11 @@ export default function BudgetVsActualsPage() {
         />
       </div>
 
-      {activeData.warnings.length > 0 ? (
+      {[...activeData.warnings, ...activeBudget.warnings].length > 0 ? (
         <section className="rounded-md border border-neutral-200 bg-white p-5">
           <h2 className="text-base font-semibold">Data Assumptions</h2>
           <ul className="mt-3 space-y-2 text-sm leading-6 text-neutral-700">
-            {activeData.warnings.map((warning) => (
+            {[...activeData.warnings, ...activeBudget.warnings].map((warning) => (
               <li key={warning} className="ml-4 list-disc">
                 {warning}
               </li>

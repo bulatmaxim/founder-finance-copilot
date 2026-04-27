@@ -10,16 +10,23 @@ import {
   type UploadStatus,
 } from "@/data/sampleUploads";
 import {
+  budgetSampleCsv,
+  parseBudgetCsv,
   parsePnlActualsCsv,
   pnlActualsSampleCsv,
 } from "@/lib/csvParser";
 import { formatCurrency } from "@/lib/formatting";
 import {
   clearUploadedActuals,
+  clearUploadedBudget,
+  getActiveBudgetData,
   getActiveFinancialData,
-  getDataSourceLabel,
+  getActualsSourceLabel,
+  getBudgetSourceLabel,
   getUploadedActualsPayload,
+  getUploadedBudgetPayload,
   saveUploadedActuals,
+  saveUploadedBudget,
 } from "@/lib/localDataStore";
 import type {
   ParsedFinancialCsv,
@@ -31,20 +38,35 @@ const reviewStatuses: UploadStatus[] = ["Needs Review", "Needs Mapping", "Failed
 
 export default function UploadsPage() {
   const persistedPayload = getUploadedActualsPayload();
+  const persistedBudgetPayload = getUploadedBudgetPayload();
   const persistedActiveData = getActiveFinancialData();
+  const persistedActiveBudget = getActiveBudgetData();
   const [message, setMessage] = useState("");
   const [toastMessage, setToastMessage] = useState("");
   const [selectedFileName, setSelectedFileName] = useState("");
+  const [selectedBudgetFileName, setSelectedBudgetFileName] = useState("");
   const [isParsing, setIsParsing] = useState(false);
+  const [isParsingBudget, setIsParsingBudget] = useState(false);
   const [parsedCsv, setParsedCsv] = useState<ParsedFinancialCsv | null>(null);
+  const [parsedBudgetCsv, setParsedBudgetCsv] =
+    useState<ParsedFinancialCsv | null>(null);
   const [sessionRows, setSessionRows] = useState<UploadedFinancialRow[]>(
     persistedPayload?.rows ?? [],
+  );
+  const [budgetRows, setBudgetRows] = useState<UploadedFinancialRow[]>(
+    persistedBudgetPayload?.rows ?? [],
   );
   const [loadedAt, setLoadedAt] = useState(
     formatLoadedAt(persistedPayload?.savedAt ?? ""),
   );
+  const [budgetLoadedAt, setBudgetLoadedAt] = useState(
+    formatLoadedAt(persistedBudgetPayload?.savedAt ?? ""),
+  );
   const [activeDataSource, setActiveDataSource] = useState(
-    getDataSourceLabel(persistedActiveData.dataSource),
+    getActualsSourceLabel(persistedActiveData.dataSource),
+  );
+  const [activeBudgetSource, setActiveBudgetSource] = useState(
+    getBudgetSourceLabel(persistedActiveBudget.dataSource),
   );
   const totalFilesUploaded = importHistory.length;
   const filesApproved = importHistory.filter(
@@ -74,9 +96,10 @@ export default function UploadsPage() {
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <DataSourceBadge label={activeDataSource} />
+          <DataSourceBadge label={activeBudgetSource} />
           <p className="text-sm text-neutral-500">
-            Uploaded CSV data is stored locally in your browser for prototype
-            testing only. It is not saved to a database yet.
+            Uploaded actuals and budget data are stored locally in your browser
+            for prototype testing only. They are not saved to a database yet.
           </p>
         </div>
       </div>
@@ -168,6 +191,46 @@ export default function UploadsPage() {
                   })
                 }
               />
+            ) : card.dataType === "Budget" ? (
+              <PnlActualsUploadControls
+                card={card}
+                isParsing={isParsingBudget}
+                selectedFileName={selectedBudgetFileName}
+                parsedCsv={parsedBudgetCsv}
+                downloadButtonLabel="Download Sample Budget CSV"
+                useButtonLabel="Use Uploaded Budget"
+                clearButtonLabel="Clear Uploaded Budget"
+                onFileSelected={async (file) => {
+                  await handleBudgetUpload(file, {
+                    setBudgetLoadedAt,
+                    setBudgetRows,
+                    setIsParsingBudget,
+                    setMessage,
+                    setParsedBudgetCsv,
+                    setSelectedBudgetFileName,
+                  });
+                }}
+                onDownloadSample={() => downloadBudgetSampleCsv()}
+                onUseUploadedData={() =>
+                  handleUseUploadedBudget({
+                    parsedBudgetCsv,
+                    setActiveBudgetSource,
+                    setBudgetLoadedAt,
+                    setBudgetRows,
+                    setMessage,
+                    setToastMessage,
+                  })
+                }
+                onClearUploadedData={() =>
+                  handleClearUploadedBudget({
+                    setActiveBudgetSource,
+                    setBudgetLoadedAt,
+                    setBudgetRows,
+                    setMessage,
+                    setToastMessage,
+                  })
+                }
+              />
             ) : (
               <button
                 type="button"
@@ -185,8 +248,32 @@ export default function UploadsPage() {
         ))}
       </div>
 
-      <SessionDataLoaded rows={sessionRows} loadedAt={loadedAt} />
-      <PnlActualsPreview parsedCsv={parsedCsv} sessionRows={sessionRows} />
+      <SessionDataLoaded
+        rows={sessionRows}
+        loadedAt={loadedAt}
+        title="Session Actuals Loaded"
+        description="Uploaded P&L actuals are available in local React state and localStorage for this browser session."
+      />
+      <SessionDataLoaded
+        rows={budgetRows}
+        loadedAt={budgetLoadedAt}
+        title="Session Budget Loaded"
+        description="Uploaded budget data is available in local React state and localStorage for this browser session."
+        revenueLabel="Total budget revenue"
+        expenseLabel="Total budget expenses"
+      />
+      <PnlActualsPreview
+        parsedCsv={parsedCsv}
+        sessionRows={sessionRows}
+        title="P&L Actuals CSV Preview"
+        emptyMessage="Upload a local CSV to preview parsed P&L actuals and validation status."
+      />
+      <PnlActualsPreview
+        parsedCsv={parsedBudgetCsv}
+        sessionRows={budgetRows}
+        title="Budget CSV Preview"
+        emptyMessage="Upload a local Budget CSV to preview parsed budget rows and validation status."
+      />
 
       <ImportHistoryTable />
       <DataQualityChecklist />
@@ -238,6 +325,50 @@ async function handlePnlActualsUpload(
   }
 }
 
+async function handleBudgetUpload(
+  file: File,
+  setters: {
+    setBudgetLoadedAt: (loadedAt: string) => void;
+    setBudgetRows: (rows: UploadedFinancialRow[]) => void;
+    setIsParsingBudget: (isParsing: boolean) => void;
+    setMessage: (message: string) => void;
+    setParsedBudgetCsv: (parsedCsv: ParsedFinancialCsv | null) => void;
+    setSelectedBudgetFileName: (fileName: string) => void;
+  },
+) {
+  setters.setIsParsingBudget(true);
+  setters.setSelectedBudgetFileName(file.name);
+  setters.setParsedBudgetCsv(null);
+  setters.setBudgetRows([]);
+  setters.setBudgetLoadedAt("");
+  setters.setMessage("Parsing local Budget CSV...");
+
+  try {
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      throw new Error("Please upload a .csv file for Budget data.");
+    }
+
+    const csvText = await file.text();
+    const parsedCsv = parseBudgetCsv(csvText);
+    const { totalRows, validRows, warningRows, errorRows } = parsedCsv.summary;
+
+    setters.setParsedBudgetCsv(parsedCsv);
+    setters.setMessage(
+      `Parsed ${totalRows} budget rows: ${validRows} valid, ${warningRows} warnings, ${errorRows} errors.`,
+    );
+  } catch (error) {
+    console.error("Budget CSV parsing failed", error);
+    setters.setParsedBudgetCsv(null);
+    setters.setMessage(
+      error instanceof Error
+        ? `Budget CSV parsing failed: ${error.message}`
+        : "Budget CSV parsing failed: unknown local parsing error.",
+    );
+  } finally {
+    setters.setIsParsingBudget(false);
+  }
+}
+
 function handleUseUploadedData({
   parsedCsv,
   setLoadedAt,
@@ -264,7 +395,8 @@ function handleUseUploadedData({
   }
 
   const parsedRowsCount = parsedCsv.rows.length;
-  const validationErrorsCount = parsedCsv.summary.errorRows + parsedCsv.errors.length;
+  const validationErrorsCount =
+    parsedCsv.summary.errorRows + parsedCsv.errors.length;
 
   console.log("Parsed rows count:", parsedRowsCount);
   console.log("Validation errors count:", validationErrorsCount);
@@ -291,7 +423,7 @@ function handleUseUploadedData({
   saveUploadedActuals(parsedCsv.rows);
   setSessionRows(parsedCsv.rows);
   setLoadedAt(loadedTimestamp);
-  setActiveDataSource(getDataSourceLabel("uploaded"));
+  setActiveDataSource(getActualsSourceLabel("uploaded"));
   setMessage(
     "Uploaded data is loaded for this session only. Database storage will be added later.",
   );
@@ -316,9 +448,96 @@ function handleClearUploadedData({
   clearUploadedActuals();
   setSessionRows([]);
   setLoadedAt("");
-  setActiveDataSource(getDataSourceLabel("sample"));
+  setActiveDataSource(getActualsSourceLabel("sample"));
   setMessage("Uploaded data cleared. The app is back in sample data mode.");
   setToastMessage("Uploaded data cleared.");
+  window.setTimeout(() => setToastMessage(""), 4000);
+}
+
+function handleUseUploadedBudget({
+  parsedBudgetCsv,
+  setActiveBudgetSource,
+  setBudgetLoadedAt,
+  setBudgetRows,
+  setMessage,
+  setToastMessage,
+}: {
+  parsedBudgetCsv: ParsedFinancialCsv | null;
+  setActiveBudgetSource: (label: string) => void;
+  setBudgetLoadedAt: (loadedAt: string) => void;
+  setBudgetRows: (rows: UploadedFinancialRow[]) => void;
+  setMessage: (message: string) => void;
+  setToastMessage: (message: string) => void;
+}) {
+  console.log("Use Uploaded Budget clicked");
+
+  if (!parsedBudgetCsv) {
+    console.log("Parsed budget rows count: 0");
+    console.log("Budget validation errors count: 0");
+    console.log("Budget loaded successfully: false");
+    setMessage("Please upload a Budget CSV file before using budget data.");
+    return;
+  }
+
+  const parsedRowsCount = parsedBudgetCsv.rows.length;
+  const validationErrorsCount =
+    parsedBudgetCsv.summary.errorRows + parsedBudgetCsv.errors.length;
+
+  console.log("Parsed budget rows count:", parsedRowsCount);
+  console.log("Budget validation errors count:", validationErrorsCount);
+
+  if (parsedRowsCount === 0) {
+    console.log("Budget loaded successfully: false");
+    setMessage("Please upload a Budget CSV file before using budget data.");
+    return;
+  }
+
+  if (validationErrorsCount > 0) {
+    console.log("Budget loaded successfully: false");
+    setMessage(
+      "Uploaded budget has validation errors. Please fix them before using this budget.",
+    );
+    return;
+  }
+
+  const loadedTimestamp = new Date().toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  saveUploadedBudget(parsedBudgetCsv.rows);
+  setBudgetRows(parsedBudgetCsv.rows);
+  setBudgetLoadedAt(loadedTimestamp);
+  setActiveBudgetSource(getBudgetSourceLabel("uploaded"));
+  setMessage(
+    "Uploaded budget is loaded for this session only. Database storage will be added later.",
+  );
+  setToastMessage("Uploaded budget loaded for this session.");
+  window.setTimeout(() => setToastMessage(""), 4000);
+  console.log("Budget loaded successfully: true");
+}
+
+function handleClearUploadedBudget({
+  setActiveBudgetSource,
+  setBudgetLoadedAt,
+  setBudgetRows,
+  setMessage,
+  setToastMessage,
+}: {
+  setActiveBudgetSource: (label: string) => void;
+  setBudgetLoadedAt: (loadedAt: string) => void;
+  setBudgetRows: (rows: UploadedFinancialRow[]) => void;
+  setMessage: (message: string) => void;
+  setToastMessage: (message: string) => void;
+}) {
+  clearUploadedBudget();
+  setBudgetRows([]);
+  setBudgetLoadedAt("");
+  setActiveBudgetSource(getBudgetSourceLabel("sample"));
+  setMessage(
+    "Uploaded budget cleared. Budget comparisons are back in sample budget mode.",
+  );
+  setToastMessage("Uploaded budget cleared.");
   window.setTimeout(() => setToastMessage(""), 4000);
 }
 
@@ -338,11 +557,30 @@ function downloadSampleCsv() {
   window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
 }
 
+function downloadBudgetSampleCsv() {
+  const blob = new Blob([budgetSampleCsv], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = "Acme_AI_Budget_Sample.csv";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+}
+
 function PnlActualsUploadControls({
   card,
   isParsing,
   selectedFileName,
   parsedCsv,
+  downloadButtonLabel = "Download Sample CSV",
+  useButtonLabel = "Use Uploaded Data",
+  clearButtonLabel = "Clear Uploaded Data",
   onFileSelected,
   onDownloadSample,
   onUseUploadedData,
@@ -352,6 +590,9 @@ function PnlActualsUploadControls({
   isParsing: boolean;
   selectedFileName: string;
   parsedCsv: ParsedFinancialCsv | null;
+  downloadButtonLabel?: string;
+  useButtonLabel?: string;
+  clearButtonLabel?: string;
   onFileSelected: (file: File) => void;
   onDownloadSample: () => void;
   onUseUploadedData: () => void;
@@ -390,7 +631,7 @@ function PnlActualsUploadControls({
           onClick={onDownloadSample}
           className="h-10 rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-50"
         >
-          Download Sample CSV
+          {downloadButtonLabel}
         </button>
         <button
           type="button"
@@ -404,14 +645,14 @@ function PnlActualsUploadControls({
           }
           className="h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
         >
-          Use Uploaded Data
+          {useButtonLabel}
         </button>
         <button
           type="button"
           onClick={onClearUploadedData}
           className="h-10 rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-50"
         >
-          Clear Uploaded Data
+          {clearButtonLabel}
         </button>
       </div>
 
@@ -439,9 +680,19 @@ function PnlActualsUploadControls({
 function SessionDataLoaded({
   rows,
   loadedAt,
+  title = "Session Data Loaded",
+  description = "Uploaded P&L actuals are available in local React state for this browser session.",
+  revenueLabel = "Total revenue",
+  expenseLabel = "Total expenses",
+  netLabel = "Net total",
 }: {
   rows: UploadedFinancialRow[];
   loadedAt: string;
+  title?: string;
+  description?: string;
+  revenueLabel?: string;
+  expenseLabel?: string;
+  netLabel?: string;
 }) {
   if (rows.length === 0 || !loadedAt) {
     return null;
@@ -471,11 +722,8 @@ function SessionDataLoaded({
     <section className="rounded-md border border-neutral-200 bg-white p-5">
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div>
-          <h2 className="text-base font-semibold">Session Data Loaded</h2>
-          <p className="mt-1 text-sm text-neutral-500">
-            Uploaded P&L actuals are available in local React state for this
-            browser session.
-          </p>
+          <h2 className="text-base font-semibold">{title}</h2>
+          <p className="mt-1 text-sm text-neutral-500">{description}</p>
         </div>
         <span className="rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
           Loaded {loadedAt}
@@ -488,12 +736,12 @@ function SessionDataLoaded({
           label="Loaded months"
           value={months.length > 0 ? months.join(", ") : "None"}
         />
-        <SummaryCard label="Total revenue" value={formatCurrency(revenue)} />
+        <SummaryCard label={revenueLabel} value={formatCurrency(revenue)} />
         <SummaryCard
-          label="Total expenses"
+          label={expenseLabel}
           value={formatCurrency(Math.abs(expenseNet))}
         />
-        <SummaryCard label="Net total" value={formatCurrency(netTotal)} />
+        <SummaryCard label={netLabel} value={formatCurrency(netTotal)} />
         <SummaryCard label="Loaded at" value={loadedAt} />
       </div>
     </section>
@@ -503,17 +751,19 @@ function SessionDataLoaded({
 function PnlActualsPreview({
   parsedCsv,
   sessionRows,
+  title = "P&L Actuals CSV Preview",
+  emptyMessage = "Upload a local CSV to preview parsed P&L actuals and validation status.",
 }: {
   parsedCsv: ParsedFinancialCsv | null;
   sessionRows: UploadedFinancialRow[];
+  title?: string;
+  emptyMessage?: string;
 }) {
   if (!parsedCsv) {
     return (
       <section className="rounded-md border border-neutral-200 bg-white p-5">
-        <h2 className="text-base font-semibold">P&L Actuals CSV Preview</h2>
-        <p className="mt-2 text-sm leading-6 text-neutral-600">
-          Upload a local CSV to preview parsed P&L actuals and validation status.
-        </p>
+        <h2 className="text-base font-semibold">{title}</h2>
+        <p className="mt-2 text-sm leading-6 text-neutral-600">{emptyMessage}</p>
       </section>
     );
   }
@@ -523,7 +773,7 @@ function PnlActualsPreview({
       <div className="rounded-md border border-neutral-200 bg-white p-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
           <div>
-            <h2 className="text-base font-semibold">P&L Actuals CSV Preview</h2>
+            <h2 className="text-base font-semibold">{title}</h2>
             <p className="mt-1 text-sm text-neutral-500">
               Local browser parse results for this session.
             </p>

@@ -24,9 +24,12 @@ import {
 } from "@/lib/formatting";
 import {
   getActiveFinancialData,
+  getActiveBudgetData,
+  getActualsSourceLabel,
+  getBudgetSourceLabel,
   getBudgetForMonth,
-  getDataSourceLabel,
   type ActiveFinancialData,
+  type ActiveBudgetData,
 } from "@/lib/localDataStore";
 
 function shortMonth(month: string) {
@@ -53,6 +56,7 @@ export function DashboardPageContent() {
   const [activeData] = useState<ActiveFinancialData>(() =>
     getActiveFinancialData(),
   );
+  const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
 
   const activeFinancials = activeData.periods;
   const latestActual = activeFinancials[activeFinancials.length - 1];
@@ -80,7 +84,8 @@ export function DashboardPageContent() {
     activeData.dataSource === "uploaded"
       ? latestActual.runwayMonths
       : calculatedRunwayMonths;
-  const dataSourceLabel = getDataSourceLabel(activeData.dataSource);
+  const actualsSourceLabel = getActualsSourceLabel(activeData.dataSource);
+  const budgetSourceLabel = getBudgetSourceLabel(activeBudget.dataSource);
 
   const metrics = [
     {
@@ -194,11 +199,13 @@ export function DashboardPageContent() {
           runway, and budget discipline.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <DataSourceBadge label={dataSourceLabel} />
-          {activeData.dataSource === "uploaded" ? (
+          <DataSourceBadge label={actualsSourceLabel} />
+          <DataSourceBadge label={budgetSourceLabel} />
+          {activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded" ? (
             <p className="text-sm text-neutral-500">
-              Uploaded CSV data is stored locally in your browser for prototype
-              testing only. Cash and runway still use sample assumptions.
+              Uploaded actuals and budget data are stored locally in your
+              browser for prototype testing only. They are not saved to a
+              database yet.
             </p>
           ) : null}
         </div>
@@ -216,11 +223,11 @@ export function DashboardPageContent() {
         showAsk={false}
       />
 
-      {activeData.warnings.length > 0 ? (
+      {[...activeData.warnings, ...activeBudget.warnings].length > 0 ? (
         <section className="rounded-md border border-neutral-200 bg-white p-5">
           <h2 className="text-base font-semibold">Data Assumptions</h2>
           <ul className="mt-3 space-y-2 text-sm leading-6 text-neutral-700">
-            {activeData.warnings.map((warning) => (
+            {[...activeData.warnings, ...activeBudget.warnings].map((warning) => (
               <li key={warning} className="ml-4 list-disc">
                 {warning}
               </li>

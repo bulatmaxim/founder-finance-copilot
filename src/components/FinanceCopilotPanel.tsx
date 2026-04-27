@@ -59,7 +59,10 @@ export function FinanceCopilotPanel({
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
-            {insightResult.dataSource}
+            {insightResult.actualsSource}
+          </span>
+          <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+            {insightResult.budgetSource}
           </span>
           {insightResult.dataWarnings.map((warning) => (
             <span key={warning} className="text-sm text-neutral-500">

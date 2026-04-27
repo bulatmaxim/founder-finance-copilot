@@ -18,9 +18,11 @@ import {
   formatVarianceLabel,
 } from "@/lib/formatting";
 import {
+  getActiveBudgetData,
   getActiveFinancialData,
+  getActualsSourceLabel,
   getBudgetForMonth,
-  getDataSourceLabel,
+  getBudgetSourceLabel,
 } from "@/lib/localDataStore";
 import type { FinancialPeriod } from "@/lib/calculations";
 
@@ -179,6 +181,7 @@ function buildDeckContext(
   }
 
   const activeData = getActiveFinancialData();
+  const activeBudget = getActiveBudgetData();
   const periods = activeData.periods;
   const index = periods.findIndex(
     (period) => period.month === reportingMonth,
@@ -213,6 +216,7 @@ function buildDeckContext(
     brief: normalizedBrief,
     metricRows,
     activeData,
+    activeBudget,
     budgetVersion,
     latestForecast,
     budgetSummary,
@@ -515,9 +519,11 @@ function addAppendixSlide(
       "Data sources: local sample P&L, budget, forecast, and cash data.",
       "This deck is a prototype generated from sample TypeScript data.",
       "Revenue, expense, EBITDA, cash, burn, and runway are calculated from local sample values.",
-      `${getDataSourceLabel(context.activeData.dataSource)}.`,
-      ...(context.activeData.dataSource === "uploaded"
-        ? ["Uploaded CSV actuals are stored locally in the browser; cash and runway use sample assumptions until cash upload is built."]
+      `${getActualsSourceLabel(context.activeData.dataSource)}.`,
+      `${getBudgetSourceLabel(context.activeBudget.dataSource)}.`,
+      ...(context.activeData.dataSource === "uploaded" ||
+      context.activeBudget.dataSource === "uploaded"
+        ? ["Uploaded actuals and budget CSV data are stored locally in the browser; cash and runway use sample assumptions until cash upload is built."]
         : []),
       "Favorable variance logic: higher is favorable for revenue, margin, EBITDA, cash, and runway; lower is favorable for expenses and net burn.",
       "No external accounting, banking, payroll, CRM, AI, or database service is connected.",
