@@ -25,11 +25,15 @@ import {
 import {
   getActiveFinancialData,
   getActiveBudgetData,
+  getActiveCashData,
   getActualsSourceLabel,
   getBudgetSourceLabel,
   getBudgetForMonth,
+  getCashMetricsForMonth,
+  getCashSourceLabel,
   type ActiveFinancialData,
   type ActiveBudgetData,
+  type ActiveCashData,
 } from "@/lib/localDataStore";
 
 function shortMonth(month: string) {
@@ -57,6 +61,7 @@ export function DashboardPageContent() {
     getActiveFinancialData(),
   );
   const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
+  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
 
   const activeFinancials = activeData.periods;
   const latestActual = activeFinancials[activeFinancials.length - 1];
@@ -75,17 +80,15 @@ export function DashboardPageContent() {
     latestActual.generalAndAdministrative,
   );
   const ebitda = calculateEbitda(grossProfit, operatingExpenses);
-  const netBurn = calculateNetBurn(ebitda);
-  const calculatedRunwayMonths = calculateRunwayMonths(
-    latestActual.cashBalance,
-    netBurn,
-  );
-  const runwayMonths =
-    activeData.dataSource === "uploaded"
-      ? latestActual.runwayMonths
-      : calculatedRunwayMonths;
+  const latestCashMetrics = getCashMetricsForMonth(latestActual.month);
+  const netBurn = latestCashMetrics?.netBurn ?? calculateNetBurn(ebitda);
+  const calculatedRunwayMonths =
+    latestCashMetrics?.runwayMonths ??
+    calculateRunwayMonths(latestActual.cashBalance, netBurn);
+  const runwayMonths = calculatedRunwayMonths;
   const actualsSourceLabel = getActualsSourceLabel(activeData.dataSource);
   const budgetSourceLabel = getBudgetSourceLabel(activeBudget.dataSource);
+  const cashSourceLabel = getCashSourceLabel(activeCash.dataSource);
 
   const metrics = [
     {
@@ -116,12 +119,15 @@ export function DashboardPageContent() {
     {
       label: "Net Burn",
       value: formatCurrency(netBurn),
-      context: "Calculated from EBITDA",
+      context:
+        activeCash.dataSource === "uploaded"
+          ? "Calculated from cash movement"
+          : "Calculated from sample cash data",
     },
     {
       label: "Runway",
       value: formatRunwayMonths(runwayMonths),
-      context: "Cash balance divided by net burn",
+      context: "Cash divided by 3-month average burn where available",
     },
   ];
 
@@ -201,11 +207,14 @@ export function DashboardPageContent() {
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <DataSourceBadge label={actualsSourceLabel} />
           <DataSourceBadge label={budgetSourceLabel} />
-          {activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded" ? (
+          <DataSourceBadge label={cashSourceLabel} />
+          {activeData.dataSource === "uploaded" ||
+          activeBudget.dataSource === "uploaded" ||
+          activeCash.dataSource === "uploaded" ? (
             <p className="text-sm text-neutral-500">
-              Uploaded actuals and budget data are stored locally in your
-              browser for prototype testing only. They are not saved to a
-              database yet.
+              Uploaded actuals, budget, and cash data are stored locally in your
+              browser for prototype testing only. They are not saved to a database
+              yet.
             </p>
           ) : null}
         </div>

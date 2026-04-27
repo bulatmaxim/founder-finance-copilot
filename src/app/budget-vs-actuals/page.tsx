@@ -19,11 +19,14 @@ import {
 } from "@/lib/formatting";
 import {
   getActiveBudgetData,
+  getActiveCashData,
   getActiveFinancialData,
   getActualsSourceLabel,
   getBudgetSourceLabel,
+  getCashSourceLabel,
   getBudgetForMonth,
   type ActiveBudgetData,
+  type ActiveCashData,
   type ActiveFinancialData,
 } from "@/lib/localDataStore";
 
@@ -145,6 +148,7 @@ export default function BudgetVsActualsPage() {
     getActiveFinancialData(),
   );
   const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
+  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [selectedMonth, setSelectedMonth] = useState(
     activeData.periods[activeData.periods.length - 1].month,
@@ -235,11 +239,14 @@ export default function BudgetVsActualsPage() {
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
             <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
-            {activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded" ? (
+            <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
+            {activeData.dataSource === "uploaded" ||
+            activeBudget.dataSource === "uploaded" ||
+            activeCash.dataSource === "uploaded" ? (
               <p className="text-sm text-neutral-500">
-                Uploaded actuals and budget data are stored locally in your
-                browser for prototype testing only. They are not saved to a
-                database yet.
+                Uploaded actuals, budget, and cash data are stored locally in your
+                browser for prototype testing only. They are not saved to a database
+                yet.
               </p>
             ) : null}
           </div>

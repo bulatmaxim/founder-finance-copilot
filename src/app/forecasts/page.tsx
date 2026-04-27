@@ -24,10 +24,13 @@ import {
 } from "@/lib/formatting";
 import {
   getActiveBudgetData,
+  getActiveCashData,
   getActiveFinancialData,
   getActualsSourceLabel,
   getBudgetSourceLabel,
+  getCashSourceLabel,
   type ActiveBudgetData,
+  type ActiveCashData,
   type ActiveFinancialData,
 } from "@/lib/localDataStore";
 
@@ -101,6 +104,7 @@ export default function ForecastsPage() {
     getActiveFinancialData(),
   );
   const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
+  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
 
   const selectedVersion = useMemo(
     () =>
@@ -167,10 +171,12 @@ export default function ForecastsPage() {
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
             <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
-            {activeBudget.dataSource === "uploaded" ? (
+            <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
+            {activeBudget.dataSource === "uploaded" ||
+            activeCash.dataSource === "uploaded" ? (
               <p className="text-sm text-neutral-500">
-                Uploaded budget data is active for budget comparisons. Forecast
-                versions still use sample forecast data for now.
+                Uploaded budget or cash data is active for local comparisons.
+                Forecast versions still use sample forecast data for now.
               </p>
             ) : null}
           </div>

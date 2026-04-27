@@ -13,10 +13,12 @@ import {
 } from "@/lib/formatting";
 import {
   getActiveBudgetData,
+  getActiveCashData,
   getActiveFinancialData,
   getActualsSourceLabel,
   getBudgetSourceLabel,
   getBudgetForMonth,
+  getCashSourceLabel,
 } from "@/lib/localDataStore";
 import type { UploadedFinancialRow } from "@/types/financial";
 
@@ -66,6 +68,7 @@ export type FinanceInsightResult = {
   dataQualityInsights: FinanceInsight[];
   actualsSource: string;
   budgetSource: string;
+  cashSource: string;
   dataWarnings: string[];
 };
 
@@ -111,50 +114,94 @@ export function generateFinanceInsights(
     dataQualityInsights,
     actualsSource: getActualsSourceLabel(context.activeData.dataSource),
     budgetSource: getBudgetSourceLabel(context.activeBudget.dataSource),
-    dataWarnings: [...context.activeData.warnings, ...context.activeBudget.warnings],
+    cashSource: getCashSourceLabel(context.activeCash.dataSource),
+    dataWarnings: [
+      ...new Set([
+        ...context.activeData.warnings,
+        ...context.activeBudget.warnings,
+        ...context.activeCash.warnings,
+      ]),
+    ],
   };
 }
 
 export function generateRunwayWarnings(
   options: FinanceInsightOptions = {},
 ): FinanceInsight[] {
-  const { actual, budget, activeData } = getInsightContext(options.reportingMonth);
+  const { actual, budget, activeData, activeCash } = getInsightContext(
+    options.reportingMonth,
+  );
   const insights: FinanceInsight[] = [];
+  const cashPeriod = activeCash.periods.find(
+    (period) => period.month === actual.month,
+  );
+  const runwayMonths = cashPeriod?.runwayMonths ?? actual.runwayMonths;
 
-  if (actual.runwayMonths < 12) {
-    const severity = actual.runwayMonths < 9 ? "High" : "Medium";
+  if (runwayMonths !== null && runwayMonths < 12) {
+    const severity = runwayMonths < 9 ? "High" : "Medium";
 
     insights.push({
       id: "runway-below-target",
       title: "Runway is below target",
       category: "Runway",
       severity,
-      summary: `${sampleCompany.name} has ${formatRunwayMonths(actual.runwayMonths)} of runway versus the 12-month operating target.`,
+      summary: `${sampleCompany.name} has ${formatRunwayMonths(runwayMonths)} of runway versus the 12-month operating target.`,
       whyItMatters:
         "Runway below target reduces the amount of time management has to improve growth, reduce burn, or prepare financing options.",
       recommendedAction:
         "Review hiring, vendor commitments, discretionary spend, and the fundraising timeline before adding fixed costs.",
       sourceMetrics: [
-        `Runway: ${formatRunwayMonths(actual.runwayMonths)}`,
+        `Runway: ${formatRunwayMonths(runwayMonths)}`,
         `Budget runway: ${formatRunwayMonths(budget.runwayMonths)}`,
         `Cash: ${formatCurrency(actual.cashBalance)}`,
-        `Net burn: ${formatCurrency(actual.netBurn)}`,
+        `3-month avg burn: ${formatCurrency(cashPeriod?.threeMonthAverageNetBurn ?? actual.netBurn)}`,
         getActualsSourceLabel(activeData.dataSource),
+        getCashSourceLabel(activeCash.dataSource),
       ],
     });
-  } else if (actual.runwayMonths < budget.runwayMonths) {
+  } else if (runwayMonths !== null && runwayMonths < budget.runwayMonths) {
     insights.push({
       id: "runway-below-budget",
       title: "Runway is behind budget",
       category: "Runway",
       severity: "Low",
-      summary: `Runway is ${formatRunwayMonths(actual.runwayMonths)}, below the budget plan of ${formatRunwayMonths(budget.runwayMonths)}.`,
+      summary: `Runway is ${formatRunwayMonths(runwayMonths)}, below the budget plan of ${formatRunwayMonths(budget.runwayMonths)}.`,
       whyItMatters:
         "A runway variance can compound quickly if burn stays above plan or revenue conversion slows.",
       recommendedAction:
         "Monitor burn and revisit the forecast before approving incremental hiring or vendor spend.",
       sourceMetrics: [
-        `Runway variance: ${formatMonthVariance(actual.runwayMonths - budget.runwayMonths)}`,
+        `Runway variance: ${formatMonthVariance(runwayMonths - budget.runwayMonths)}`,
+      ],
+    });
+  }
+
+  const currentIndex = activeCash.periods.findIndex(
+    (period) => period.month === actual.month,
+  );
+  const priorCashPeriod = currentIndex > 0 ? activeCash.periods[currentIndex - 1] : null;
+
+  if (
+    cashPeriod?.runwayMonths !== null &&
+    cashPeriod?.runwayMonths !== undefined &&
+    priorCashPeriod?.runwayMonths !== null &&
+    priorCashPeriod?.runwayMonths !== undefined &&
+    cashPeriod.runwayMonths > priorCashPeriod.runwayMonths
+  ) {
+    insights.push({
+      id: "runway-improved",
+      title: "Runway improved",
+      category: "Runway",
+      severity: "Low",
+      summary: `Runway improved from ${formatRunwayMonths(priorCashPeriod.runwayMonths)} to ${formatRunwayMonths(cashPeriod.runwayMonths)}.`,
+      whyItMatters:
+        "Improving runway gives management more flexibility if the burn trend is durable.",
+      recommendedAction:
+        "Confirm whether the improvement came from lower burn, cash receipts, or timing before changing the operating plan.",
+      sourceMetrics: [
+        `Prior runway: ${formatRunwayMonths(priorCashPeriod.runwayMonths)}`,
+        `Current runway: ${formatRunwayMonths(cashPeriod.runwayMonths)}`,
+        getCashSourceLabel(activeCash.dataSource),
       ],
     });
   }
@@ -165,9 +212,8 @@ export function generateRunwayWarnings(
 export function generateVarianceInsights(
   options: FinanceInsightOptions = {},
 ): FinanceInsight[] {
-  const { actual, budget, priorActual, activeData, activeBudget } = getInsightContext(
-    options.reportingMonth,
-  );
+  const { actual, budget, priorActual, activeData, activeBudget, activeCash } =
+    getInsightContext(options.reportingMonth);
   const insights: FinanceInsight[] = [];
   const revenueVariance = calculateVarianceDollars(actual.revenue, budget.revenue);
   const revenueVariancePercent = calculateVariancePercent(
@@ -273,14 +319,27 @@ export function generateVarianceInsights(
     });
   }
 
+  const cashPeriod = activeCash.periods.find(
+    (period) => period.month === actual.month,
+  );
+  const cashIndex = activeCash.periods.findIndex(
+    (period) => period.month === actual.month,
+  );
+  const priorCashPeriod = cashIndex > 0 ? activeCash.periods[cashIndex - 1] : null;
+
   if (priorActual && actual.cashBalance < priorActual.cashBalance) {
-    const cashChange = actual.cashBalance - priorActual.cashBalance;
+    const cashChange = cashPeriod?.monthlyCashChange ?? actual.cashBalance - priorActual.cashBalance;
+    const cashDeclinePercent =
+      priorActual.cashBalance > 0 ? Math.abs(cashChange) / priorActual.cashBalance : 0;
 
     insights.push({
       id: "cash-balance-declining",
-      title: "Cash balance declined month over month",
+      title:
+        cashDeclinePercent > 0.15
+          ? "Cash declined sharply month over month"
+          : "Cash balance declined month over month",
       category: "Cash",
-      severity: "Low",
+      severity: cashDeclinePercent > 0.15 ? "Medium" : "Low",
       summary: `Cash declined by ${formatCurrency(Math.abs(cashChange))} from ${priorActual.month} to ${actual.month}.`,
       whyItMatters:
         "A declining cash balance is expected while the business is burning cash, but the pace should be checked against plan.",
@@ -289,9 +348,31 @@ export function generateVarianceInsights(
       sourceMetrics: [
         `${priorActual.month} cash: ${formatCurrency(priorActual.cashBalance)}`,
         `${actual.month} cash: ${formatCurrency(actual.cashBalance)}`,
-        activeData.dataSource === "uploaded"
-          ? "Cash uses sample assumption"
-          : getActualsSourceLabel(activeData.dataSource),
+        getCashSourceLabel(activeCash.dataSource),
+      ],
+    });
+  }
+
+  if (
+    cashPeriod &&
+    priorCashPeriod &&
+    cashPeriod.netBurn > priorCashPeriod.netBurn &&
+    cashPeriod.netBurn > 0
+  ) {
+    insights.push({
+      id: "net-burn-increased",
+      title: "Net burn increased versus prior month",
+      category: "Cash",
+      severity: cashPeriod.netBurn > priorCashPeriod.netBurn * 1.15 ? "Medium" : "Low",
+      summary: `Net burn increased from ${formatCurrency(priorCashPeriod.netBurn)} to ${formatCurrency(cashPeriod.netBurn)} month over month.`,
+      whyItMatters:
+        "A rising burn trend can shorten runway quickly if it is structural rather than timing-related.",
+      recommendedAction:
+        "Review hiring, vendor spend, collections timing, and one-time payments before approving additional cash outflows.",
+      sourceMetrics: [
+        `Prior net burn: ${formatCurrency(priorCashPeriod.netBurn)}`,
+        `Current net burn: ${formatCurrency(cashPeriod.netBurn)}`,
+        getCashSourceLabel(activeCash.dataSource),
       ],
     });
   }
@@ -442,9 +523,8 @@ export function generateRecommendedActions(
 }
 
 export function generateFounderSummary(options: FinanceInsightOptions = {}) {
-  const { actual, budget, priorActual, activeData, activeBudget } = getInsightContext(
-    options.reportingMonth,
-  );
+  const { actual, budget, priorActual, activeData, activeBudget, activeCash } =
+    getInsightContext(options.reportingMonth);
   const revenueVariance = actual.revenue - budget.revenue;
   const opexVariance = actual.operatingExpenses - budget.operatingExpenses;
   const ebitdaVariance = actual.ebitda - budget.ebitda;
@@ -465,9 +545,11 @@ export function generateFounderSummary(options: FinanceInsightOptions = {}) {
     : `cash ended at ${formatCurrency(actual.cashBalance)}`;
 
   const sourcePhrase =
-    activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded"
-      ? `This analysis uses ${getActualsSourceLabel(activeData.dataSource).replace("Actuals Source: ", "").toLowerCase()} and ${getBudgetSourceLabel(activeBudget.dataSource).replace("Budget Source: ", "").toLowerCase()}; cash and runway remain sample assumptions until cash upload is built.`
-      : "This analysis uses local sample financial data and sample budget data.";
+    activeData.dataSource === "uploaded" ||
+    activeBudget.dataSource === "uploaded" ||
+    activeCash.dataSource === "uploaded"
+      ? `This analysis uses ${getActualsSourceLabel(activeData.dataSource).replace("Actuals Source: ", "").toLowerCase()}, ${getBudgetSourceLabel(activeBudget.dataSource).replace("Budget Source: ", "").toLowerCase()}, and ${getCashSourceLabel(activeCash.dataSource).replace("Cash Source: ", "").toLowerCase()}.`
+      : "This analysis uses local sample financial, budget, and cash data.";
 
   return `${sampleCompany.name} closed ${actual.month} with ${revenuePhrase}, ${spendPhrase}, and EBITDA ${ebitdaVariance >= 0 ? "ahead of" : "below"} plan by ${formatVarianceLabel(ebitdaVariance)}. ${cashPhrase}, ending with ${formatRunwayMonths(actual.runwayMonths)} of runway. ${forecastRecommendation.shouldUpdate ? "Management should refresh the latest forecast and tighten the investor narrative around the main variance drivers." : "Management can maintain the current forecast posture while continuing to monitor burn and pipeline quality."} ${sourcePhrase}`;
 }
@@ -478,14 +560,19 @@ export function generateDataQualityInsights(
   const insights: FinanceInsight[] = [];
   const activeData = getActiveFinancialData();
   const activeBudget = getActiveBudgetData();
+  const activeCash = getActiveCashData();
 
-  if (activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded") {
+  if (
+    activeData.dataSource === "uploaded" ||
+    activeBudget.dataSource === "uploaded" ||
+    activeCash.dataSource === "uploaded"
+  ) {
     insights.push({
       id: "uploaded-data-active",
       title: "Uploaded CSV data is active",
       category: "Data Quality",
       severity: "Low",
-      summary: `The finance copilot is using ${getActualsSourceLabel(activeData.dataSource).replace("Actuals Source: ", "").toLowerCase()} and ${getBudgetSourceLabel(activeBudget.dataSource).replace("Budget Source: ", "").toLowerCase()}.`,
+      summary: `The finance copilot is using ${getActualsSourceLabel(activeData.dataSource).replace("Actuals Source: ", "").toLowerCase()}, ${getBudgetSourceLabel(activeBudget.dataSource).replace("Budget Source: ", "").toLowerCase()}, and ${getCashSourceLabel(activeCash.dataSource).replace("Cash Source: ", "").toLowerCase()}.`,
       whyItMatters:
         "This proves the local prototype can analyze user-provided actuals without a database or external integrations.",
       recommendedAction:
@@ -493,7 +580,7 @@ export function generateDataQualityInsights(
       sourceMetrics: [
         `Uploaded rows: ${activeData.uploadedRows.length}`,
         `Uploaded budget rows: ${activeBudget.uploadedRows.length}`,
-        "Cash and runway use sample assumptions",
+        `Uploaded cash rows: ${activeCash.uploadedRows.length}`,
       ],
     });
   } else if (!options.uploadedRows || options.uploadedRows.length === 0) {
@@ -599,6 +686,7 @@ function buildForecastInsights(
 }
 
 function getInsightContext(reportingMonth?: string) {
+  const activeCash = getActiveCashData();
   const activeData = getActiveFinancialData();
   const activeBudget = getActiveBudgetData();
   const periods = activeData.periods.length > 0 ? activeData.periods : sampleFinancials;
@@ -621,6 +709,7 @@ function getInsightContext(reportingMonth?: string) {
     latestForecastMonth,
     activeData,
     activeBudget,
+    activeCash,
   };
 }
 

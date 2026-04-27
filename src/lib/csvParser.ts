@@ -1,6 +1,8 @@
 import Papa from "papaparse";
 import type {
+  ParsedCashCsv,
   ParsedFinancialCsv,
+  UploadedCashRow,
   UploadedFinancialRow,
   UploadValidationStatus,
 } from "@/types/financial";
@@ -12,7 +14,13 @@ type RawFinancialCsvRow = {
   amount?: string;
 };
 
+type RawCashCsvRow = {
+  month?: string;
+  cashBalance?: string;
+};
+
 const expectedColumns = ["month", "account", "category", "amount"];
+const expectedCashColumns = ["month", "cashBalance"];
 const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export const pnlActualsSampleCsv = [
@@ -51,12 +59,69 @@ export const budgetSampleCsv = [
   }),
 ].join("\n");
 
+export const cashBalanceSampleCsv = [
+  "month,cashBalance",
+  "2026-01,1961000",
+  "2026-02,1835000",
+  "2026-03,1717000",
+  "2026-04,1599000",
+  "2026-05,1480000",
+  "2026-06,1365000",
+  "2026-07,1253000",
+  "2026-08,1145000",
+  "2026-09,1040000",
+  "2026-10,935000",
+  "2026-11,832000",
+  "2026-12,730000",
+].join("\n");
+
 export function parsePnlActualsCsv(csvText: string): ParsedFinancialCsv {
   return parseFinancialCsv(csvText);
 }
 
 export function parseBudgetCsv(csvText: string): ParsedFinancialCsv {
   return parseFinancialCsv(csvText);
+}
+
+export function parseCashBalanceCsv(csvText: string): ParsedCashCsv {
+  const parsed = Papa.parse<RawCashCsvRow>(csvText, {
+    header: true,
+    skipEmptyLines: "greedy",
+    transformHeader: (header) => {
+      const normalized = header.trim().toLowerCase();
+
+      return normalized === "cashbalance" ? "cashBalance" : normalized;
+    },
+  });
+
+  const parseErrors = parsed.errors.map((error) => {
+    const row = typeof error.row === "number" ? ` on row ${error.row + 2}` : "";
+
+    return `${error.message}${row}`;
+  });
+  const fields = parsed.meta.fields ?? [];
+  const missingColumns = expectedCashColumns.filter(
+    (column) => !fields.includes(column),
+  );
+
+  if (missingColumns.length > 0) {
+    parseErrors.push(
+      `Missing required column(s): ${missingColumns
+        .join(", ")}.`,
+    );
+  }
+
+  const duplicateMonths = findDuplicateMonths(parsed.data);
+  const baseRows = parsed.data.map((row, index) =>
+    validateCashRow(row, index + 2, duplicateMonths),
+  );
+  const rows = addCashMovementWarnings(baseRows);
+
+  return {
+    rows,
+    summary: summarizeRows(rows),
+    errors: parseErrors,
+  };
 }
 
 function parseFinancialCsv(csvText: string): ParsedFinancialCsv {
@@ -154,6 +219,99 @@ function validateFinancialRow(
   };
 }
 
+function validateCashRow(
+  row: RawCashCsvRow,
+  rowNumber: number,
+  duplicateMonths: Set<string>,
+): UploadedCashRow {
+  const month = clean(row.month);
+  const cashBalanceRaw = clean(row.cashBalance);
+  const cashBalance = parseAmount(cashBalanceRaw);
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!month) {
+    errors.push("Missing month");
+  } else if (!monthPattern.test(month)) {
+    errors.push("Invalid month format");
+  }
+
+  if (!cashBalanceRaw) {
+    errors.push("Missing cashBalance");
+  } else if (cashBalance === null) {
+    errors.push("Non-numeric cashBalance");
+  }
+
+  if (duplicateMonths.has(month.toLowerCase())) {
+    errors.push("Duplicate month");
+  }
+
+  if (cashBalance !== null && cashBalance < 0) {
+    errors.push("Negative cash balance");
+  }
+
+  const status: UploadValidationStatus =
+    errors.length > 0 ? "Error" : warnings.length > 0 ? "Warning" : "Valid";
+
+  return {
+    rowNumber,
+    month,
+    cashBalanceRaw,
+    cashBalance,
+    monthlyChange: null,
+    status,
+    messages: [...errors, ...warnings],
+  };
+}
+
+function addCashMovementWarnings(rows: UploadedCashRow[]) {
+  const rowsByMonth = [...rows].sort(
+    (first, second) => cashMonthSortValue(first.month) - cashMonthSortValue(second.month),
+  );
+  const monthlyChangeByRowNumber = new Map<number, number | null>();
+  const movementWarningRows = new Set<number>();
+
+  rowsByMonth.forEach((row, index) => {
+    const priorRow = rowsByMonth[index - 1];
+
+    if (
+      !priorRow ||
+      row.cashBalance === null ||
+      priorRow.cashBalance === null ||
+      priorRow.cashBalance === 0 ||
+      row.status === "Error" ||
+      priorRow.status === "Error"
+    ) {
+      monthlyChangeByRowNumber.set(row.rowNumber, null);
+      return;
+    }
+
+    const monthlyChange = row.cashBalance - priorRow.cashBalance;
+    monthlyChangeByRowNumber.set(row.rowNumber, monthlyChange);
+
+    if (Math.abs(monthlyChange) / Math.abs(priorRow.cashBalance) > 0.25) {
+      movementWarningRows.add(row.rowNumber);
+    }
+  });
+
+  return rows.map((row) => {
+    const messages = [...row.messages];
+    let status = row.status;
+
+    if (movementWarningRows.has(row.rowNumber) && status !== "Error") {
+      messages.push("Large month-over-month cash movement");
+      status = "Warning";
+    }
+
+    return {
+      ...row,
+      monthlyChange: monthlyChangeByRowNumber.get(row.rowNumber) ?? null,
+      status,
+      messages,
+    };
+  });
+}
+
 function findDuplicateKeys(rows: RawFinancialCsvRow[]) {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
@@ -175,7 +333,28 @@ function findDuplicateKeys(rows: RawFinancialCsvRow[]) {
   return duplicates;
 }
 
-function summarizeRows(rows: UploadedFinancialRow[]) {
+function findDuplicateMonths(rows: RawCashCsvRow[]) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  rows.forEach((row) => {
+    const month = clean(row.month).toLowerCase();
+
+    if (!month) {
+      return;
+    }
+
+    if (seen.has(month)) {
+      duplicates.add(month);
+    } else {
+      seen.add(month);
+    }
+  });
+
+  return duplicates;
+}
+
+function summarizeRows(rows: { status: UploadValidationStatus }[]) {
   return rows.reduce(
     (summary, row) => {
       summary.totalRows += 1;
@@ -228,4 +407,12 @@ function rowKey(month: string, account: string, category: string) {
 
 function isRevenueCategory(category: string) {
   return category.toLowerCase().includes("revenue");
+}
+
+function cashMonthSortValue(month: string) {
+  if (!monthPattern.test(month)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return new Date(`${month}-01T00:00:00`).getTime();
 }

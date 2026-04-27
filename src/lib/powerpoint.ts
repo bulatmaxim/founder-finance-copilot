@@ -19,10 +19,13 @@ import {
 } from "@/lib/formatting";
 import {
   getActiveBudgetData,
+  getActiveCashData,
   getActiveFinancialData,
   getActualsSourceLabel,
   getBudgetForMonth,
   getBudgetSourceLabel,
+  getCashMetricsForMonth,
+  getCashSourceLabel,
 } from "@/lib/localDataStore";
 import type { FinancialPeriod } from "@/lib/calculations";
 
@@ -182,6 +185,7 @@ function buildDeckContext(
 
   const activeData = getActiveFinancialData();
   const activeBudget = getActiveBudgetData();
+  const activeCash = getActiveCashData();
   const periods = activeData.periods;
   const index = periods.findIndex(
     (period) => period.month === reportingMonth,
@@ -189,6 +193,7 @@ function buildDeckContext(
   const safeIndex = index >= 0 ? index : periods.length - 1;
   const actual = periods[safeIndex];
   const budget = getBudgetForMonth(actual.month, safeIndex);
+  const cashMetrics = getCashMetricsForMonth(actual.month);
   const normalizedBrief = normalizeBrief(brief, reportingMonth);
 
   if (!actual) {
@@ -217,6 +222,8 @@ function buildDeckContext(
     metricRows,
     activeData,
     activeBudget,
+    activeCash,
+    cashMetrics,
     budgetVersion,
     latestForecast,
     budgetSummary,
@@ -365,7 +372,7 @@ function addExecutiveSummarySlide(
     ["Revenue", formatCurrency(context.actual.revenue)],
     ["EBITDA", formatCurrency(context.actual.ebitda)],
     ["Cash", formatCurrency(context.actual.cashBalance)],
-    ["Runway", formatRunwayMonths(context.actual.runwayMonths)],
+    ["Runway", formatRunwayMonths(context.cashMetrics?.runwayMonths ?? context.actual.runwayMonths)],
   ]);
 }
 
@@ -455,12 +462,14 @@ function addCashRunwaySlide(
 ) {
   addSlideShell(slide, "Cash & Runway", context.reportingMonth, pageNumber);
   addMetricStrip(slide, [
-    ["Cash balance", formatCurrency(context.actual.cashBalance)],
-    ["Net burn", formatCurrency(context.actual.netBurn)],
+    ["Latest cash", formatCurrency(context.actual.cashBalance)],
+    ["Prior cash", context.cashMetrics?.priorCashBalance === null || context.cashMetrics?.priorCashBalance === undefined ? "N/A" : formatCurrency(context.cashMetrics.priorCashBalance)],
+    ["Monthly change", context.cashMetrics?.monthlyCashChange === null || context.cashMetrics?.monthlyCashChange === undefined ? "N/A" : formatVarianceLabel(context.cashMetrics.monthlyCashChange)],
+    ["3-mo avg burn", formatCurrency(context.cashMetrics?.threeMonthAverageNetBurn ?? context.actual.netBurn)],
     ["Runway", formatRunwayMonths(context.actual.runwayMonths)],
-    ["Runway warning", context.actual.runwayMonths < 12 ? "Below target" : "Above target"],
+    ["Cash-out date", context.cashMetrics?.estimatedCashOutDate ?? "N/A"],
   ]);
-  addBulletList(slide, context.brief.cashRunwayCommentary.slice(0, 4), 0.95, 3.0, 11.3, 2.3);
+  addBulletList(slide, context.brief.cashRunwayCommentary.slice(0, 5), 0.95, 3.0, 11.3, 2.3);
 }
 
 function addForecastSlide(
@@ -521,9 +530,11 @@ function addAppendixSlide(
       "Revenue, expense, EBITDA, cash, burn, and runway are calculated from local sample values.",
       `${getActualsSourceLabel(context.activeData.dataSource)}.`,
       `${getBudgetSourceLabel(context.activeBudget.dataSource)}.`,
+      `${getCashSourceLabel(context.activeCash.dataSource)}.`,
       ...(context.activeData.dataSource === "uploaded" ||
-      context.activeBudget.dataSource === "uploaded"
-        ? ["Uploaded actuals and budget CSV data are stored locally in the browser; cash and runway use sample assumptions until cash upload is built."]
+      context.activeBudget.dataSource === "uploaded" ||
+      context.activeCash.dataSource === "uploaded"
+        ? ["Uploaded actuals, budget, and cash CSV data are stored locally in the browser for prototype testing only."]
         : []),
       "Favorable variance logic: higher is favorable for revenue, margin, EBITDA, cash, and runway; lower is favorable for expenses and net burn.",
       "No external accounting, banking, payroll, CRM, AI, or database service is connected.",

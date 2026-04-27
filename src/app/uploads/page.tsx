@@ -11,7 +11,9 @@ import {
 } from "@/data/sampleUploads";
 import {
   budgetSampleCsv,
+  cashBalanceSampleCsv,
   parseBudgetCsv,
+  parseCashBalanceCsv,
   parsePnlActualsCsv,
   pnlActualsSampleCsv,
 } from "@/lib/csvParser";
@@ -19,17 +21,24 @@ import { formatCurrency } from "@/lib/formatting";
 import {
   clearUploadedActuals,
   clearUploadedBudget,
+  clearUploadedCash,
   getActiveBudgetData,
+  getActiveCashData,
   getActiveFinancialData,
   getActualsSourceLabel,
   getBudgetSourceLabel,
+  getCashSourceLabel,
   getUploadedActualsPayload,
   getUploadedBudgetPayload,
+  getUploadedCashPayload,
   saveUploadedActuals,
   saveUploadedBudget,
+  saveUploadedCash,
 } from "@/lib/localDataStore";
 import type {
+  ParsedCashCsv,
   ParsedFinancialCsv,
+  UploadedCashRow,
   UploadedFinancialRow,
   UploadValidationStatus,
 } from "@/types/financial";
@@ -39,22 +48,30 @@ const reviewStatuses: UploadStatus[] = ["Needs Review", "Needs Mapping", "Failed
 export default function UploadsPage() {
   const persistedPayload = getUploadedActualsPayload();
   const persistedBudgetPayload = getUploadedBudgetPayload();
+  const persistedCashPayload = getUploadedCashPayload();
   const persistedActiveData = getActiveFinancialData();
   const persistedActiveBudget = getActiveBudgetData();
+  const persistedActiveCash = getActiveCashData();
   const [message, setMessage] = useState("");
   const [toastMessage, setToastMessage] = useState("");
   const [selectedFileName, setSelectedFileName] = useState("");
   const [selectedBudgetFileName, setSelectedBudgetFileName] = useState("");
+  const [selectedCashFileName, setSelectedCashFileName] = useState("");
   const [isParsing, setIsParsing] = useState(false);
   const [isParsingBudget, setIsParsingBudget] = useState(false);
+  const [isParsingCash, setIsParsingCash] = useState(false);
   const [parsedCsv, setParsedCsv] = useState<ParsedFinancialCsv | null>(null);
   const [parsedBudgetCsv, setParsedBudgetCsv] =
     useState<ParsedFinancialCsv | null>(null);
+  const [parsedCashCsv, setParsedCashCsv] = useState<ParsedCashCsv | null>(null);
   const [sessionRows, setSessionRows] = useState<UploadedFinancialRow[]>(
     persistedPayload?.rows ?? [],
   );
   const [budgetRows, setBudgetRows] = useState<UploadedFinancialRow[]>(
     persistedBudgetPayload?.rows ?? [],
+  );
+  const [cashRows, setCashRows] = useState<UploadedCashRow[]>(
+    persistedCashPayload?.rows ?? [],
   );
   const [loadedAt, setLoadedAt] = useState(
     formatLoadedAt(persistedPayload?.savedAt ?? ""),
@@ -62,11 +79,17 @@ export default function UploadsPage() {
   const [budgetLoadedAt, setBudgetLoadedAt] = useState(
     formatLoadedAt(persistedBudgetPayload?.savedAt ?? ""),
   );
+  const [cashLoadedAt, setCashLoadedAt] = useState(
+    formatLoadedAt(persistedCashPayload?.savedAt ?? ""),
+  );
   const [activeDataSource, setActiveDataSource] = useState(
     getActualsSourceLabel(persistedActiveData.dataSource),
   );
   const [activeBudgetSource, setActiveBudgetSource] = useState(
     getBudgetSourceLabel(persistedActiveBudget.dataSource),
+  );
+  const [activeCashSource, setActiveCashSource] = useState(
+    getCashSourceLabel(persistedActiveCash.dataSource),
   );
   const totalFilesUploaded = importHistory.length;
   const filesApproved = importHistory.filter(
@@ -97,9 +120,11 @@ export default function UploadsPage() {
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <DataSourceBadge label={activeDataSource} />
           <DataSourceBadge label={activeBudgetSource} />
+          <DataSourceBadge label={activeCashSource} />
           <p className="text-sm text-neutral-500">
-            Uploaded actuals and budget data are stored locally in your browser
-            for prototype testing only. They are not saved to a database yet.
+            Uploaded actuals, budget, and cash data are stored locally in your
+            browser for prototype testing only. They are not saved to a database
+            yet.
           </p>
         </div>
       </div>
@@ -231,6 +256,47 @@ export default function UploadsPage() {
                   })
                 }
               />
+            ) : card.dataType === "Cash Balance" ? (
+              <PnlActualsUploadControls
+                card={card}
+                isParsing={isParsingCash}
+                selectedFileName={selectedCashFileName}
+                parsedCsv={parsedCashCsv}
+                downloadButtonLabel="Download Sample Cash Balance CSV"
+                useButtonLabel="Use Uploaded Cash Data"
+                clearButtonLabel="Clear Uploaded Cash Data"
+                expectedColumnsHelp="Cash Balance expects month and cashBalance columns."
+                onFileSelected={async (file) => {
+                  await handleCashUpload(file, {
+                    setCashLoadedAt,
+                    setCashRows,
+                    setIsParsingCash,
+                    setMessage,
+                    setParsedCashCsv,
+                    setSelectedCashFileName,
+                  });
+                }}
+                onDownloadSample={() => downloadCashSampleCsv()}
+                onUseUploadedData={() =>
+                  handleUseUploadedCash({
+                    parsedCashCsv,
+                    setActiveCashSource,
+                    setCashLoadedAt,
+                    setCashRows,
+                    setMessage,
+                    setToastMessage,
+                  })
+                }
+                onClearUploadedData={() =>
+                  handleClearUploadedCash({
+                    setActiveCashSource,
+                    setCashLoadedAt,
+                    setCashRows,
+                    setMessage,
+                    setToastMessage,
+                  })
+                }
+              />
             ) : (
               <button
                 type="button"
@@ -262,6 +328,7 @@ export default function UploadsPage() {
         revenueLabel="Total budget revenue"
         expenseLabel="Total budget expenses"
       />
+      <CashSessionDataLoaded rows={cashRows} loadedAt={cashLoadedAt} />
       <PnlActualsPreview
         parsedCsv={parsedCsv}
         sessionRows={sessionRows}
@@ -274,6 +341,7 @@ export default function UploadsPage() {
         title="Budget CSV Preview"
         emptyMessage="Upload a local Budget CSV to preview parsed budget rows and validation status."
       />
+      <CashBalancePreview parsedCsv={parsedCashCsv} sessionRows={cashRows} />
 
       <ImportHistoryTable />
       <DataQualityChecklist />
@@ -366,6 +434,50 @@ async function handleBudgetUpload(
     );
   } finally {
     setters.setIsParsingBudget(false);
+  }
+}
+
+async function handleCashUpload(
+  file: File,
+  setters: {
+    setCashLoadedAt: (loadedAt: string) => void;
+    setCashRows: (rows: UploadedCashRow[]) => void;
+    setIsParsingCash: (isParsing: boolean) => void;
+    setMessage: (message: string) => void;
+    setParsedCashCsv: (parsedCsv: ParsedCashCsv | null) => void;
+    setSelectedCashFileName: (fileName: string) => void;
+  },
+) {
+  setters.setIsParsingCash(true);
+  setters.setSelectedCashFileName(file.name);
+  setters.setParsedCashCsv(null);
+  setters.setCashRows([]);
+  setters.setCashLoadedAt("");
+  setters.setMessage("Parsing local Cash Balance CSV...");
+
+  try {
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      throw new Error("Please upload a .csv file for Cash Balance data.");
+    }
+
+    const csvText = await file.text();
+    const parsedCsv = parseCashBalanceCsv(csvText);
+    const { totalRows, validRows, warningRows, errorRows } = parsedCsv.summary;
+
+    setters.setParsedCashCsv(parsedCsv);
+    setters.setMessage(
+      `Parsed ${totalRows} cash rows: ${validRows} valid, ${warningRows} warnings, ${errorRows} errors.`,
+    );
+  } catch (error) {
+    console.error("Cash Balance CSV parsing failed", error);
+    setters.setParsedCashCsv(null);
+    setters.setMessage(
+      error instanceof Error
+        ? `Cash Balance CSV parsing failed: ${error.message}`
+        : "Cash Balance CSV parsing failed: unknown local parsing error.",
+    );
+  } finally {
+    setters.setIsParsingCash(false);
   }
 }
 
@@ -541,6 +653,93 @@ function handleClearUploadedBudget({
   window.setTimeout(() => setToastMessage(""), 4000);
 }
 
+function handleUseUploadedCash({
+  parsedCashCsv,
+  setActiveCashSource,
+  setCashLoadedAt,
+  setCashRows,
+  setMessage,
+  setToastMessage,
+}: {
+  parsedCashCsv: ParsedCashCsv | null;
+  setActiveCashSource: (label: string) => void;
+  setCashLoadedAt: (loadedAt: string) => void;
+  setCashRows: (rows: UploadedCashRow[]) => void;
+  setMessage: (message: string) => void;
+  setToastMessage: (message: string) => void;
+}) {
+  console.log("Use Uploaded Cash Data clicked");
+
+  if (!parsedCashCsv) {
+    console.log("Parsed cash rows count: 0");
+    console.log("Cash validation errors count: 0");
+    console.log("Cash loaded successfully: false");
+    setMessage("Please upload a Cash Balance CSV file before using cash data.");
+    return;
+  }
+
+  const parsedRowsCount = parsedCashCsv.rows.length;
+  const validationErrorsCount =
+    parsedCashCsv.summary.errorRows + parsedCashCsv.errors.length;
+
+  console.log("Parsed cash rows count:", parsedRowsCount);
+  console.log("Cash validation errors count:", validationErrorsCount);
+
+  if (parsedRowsCount === 0) {
+    console.log("Cash loaded successfully: false");
+    setMessage("Please upload a Cash Balance CSV file before using cash data.");
+    return;
+  }
+
+  if (validationErrorsCount > 0) {
+    console.log("Cash loaded successfully: false");
+    setMessage(
+      "Uploaded cash data has validation errors. Please fix them before using this cash data.",
+    );
+    return;
+  }
+
+  const loadedTimestamp = new Date().toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  saveUploadedCash(parsedCashCsv.rows);
+  setCashRows(parsedCashCsv.rows);
+  setCashLoadedAt(loadedTimestamp);
+  setActiveCashSource(getCashSourceLabel("uploaded"));
+  setMessage(
+    "Uploaded cash data is loaded for this session only. Database storage will be added later.",
+  );
+  setToastMessage("Uploaded cash data loaded for this session.");
+  window.setTimeout(() => setToastMessage(""), 4000);
+  console.log("Cash loaded successfully: true");
+}
+
+function handleClearUploadedCash({
+  setActiveCashSource,
+  setCashLoadedAt,
+  setCashRows,
+  setMessage,
+  setToastMessage,
+}: {
+  setActiveCashSource: (label: string) => void;
+  setCashLoadedAt: (loadedAt: string) => void;
+  setCashRows: (rows: UploadedCashRow[]) => void;
+  setMessage: (message: string) => void;
+  setToastMessage: (message: string) => void;
+}) {
+  clearUploadedCash();
+  setCashRows([]);
+  setCashLoadedAt("");
+  setActiveCashSource(getCashSourceLabel("sample"));
+  setMessage(
+    "Uploaded cash data cleared. Cash and runway calculations are back in sample data mode.",
+  );
+  setToastMessage("Uploaded cash data cleared.");
+  window.setTimeout(() => setToastMessage(""), 4000);
+}
+
 function downloadSampleCsv() {
   const blob = new Blob([pnlActualsSampleCsv], {
     type: "text/csv;charset=utf-8",
@@ -573,6 +772,22 @@ function downloadBudgetSampleCsv() {
   window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
 }
 
+function downloadCashSampleCsv() {
+  const blob = new Blob([cashBalanceSampleCsv], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = "Acme_AI_Cash_Balance_Sample.csv";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+}
+
 function PnlActualsUploadControls({
   card,
   isParsing,
@@ -581,6 +796,7 @@ function PnlActualsUploadControls({
   downloadButtonLabel = "Download Sample CSV",
   useButtonLabel = "Use Uploaded Data",
   clearButtonLabel = "Clear Uploaded Data",
+  expectedColumnsHelp,
   onFileSelected,
   onDownloadSample,
   onUseUploadedData,
@@ -589,10 +805,11 @@ function PnlActualsUploadControls({
   card: UploadCard;
   isParsing: boolean;
   selectedFileName: string;
-  parsedCsv: ParsedFinancialCsv | null;
+  parsedCsv: { summary: { totalRows: number; errorRows: number }; errors: string[] } | null;
   downloadButtonLabel?: string;
   useButtonLabel?: string;
   clearButtonLabel?: string;
+  expectedColumnsHelp?: string;
   onFileSelected: (file: File) => void;
   onDownloadSample: () => void;
   onUseUploadedData: () => void;
@@ -671,7 +888,8 @@ function PnlActualsUploadControls({
       ) : null}
 
       <p className="text-xs leading-5 text-neutral-500">
-        {card.dataType} expects month, account, category, and amount columns.
+        {expectedColumnsHelp ??
+          `${card.dataType} expects month, account, category, and amount columns.`}
       </p>
     </div>
   );
@@ -742,6 +960,86 @@ function SessionDataLoaded({
           value={formatCurrency(Math.abs(expenseNet))}
         />
         <SummaryCard label={netLabel} value={formatCurrency(netTotal)} />
+        <SummaryCard label="Loaded at" value={loadedAt} />
+      </div>
+    </section>
+  );
+}
+
+function CashSessionDataLoaded({
+  rows,
+  loadedAt,
+}: {
+  rows: UploadedCashRow[];
+  loadedAt: string;
+}) {
+  if (rows.length === 0 || !loadedAt) {
+    return null;
+  }
+
+  const sortedRows = getSortedCashRows(rows);
+  const firstRow = sortedRows[0];
+  const latestRow = sortedRows[sortedRows.length - 1];
+  const positiveBurns = sortedRows
+    .map((row, index) => {
+      const priorRow = sortedRows[index - 1];
+
+      if (!priorRow || row.cashBalance === null || priorRow.cashBalance === null) {
+        return 0;
+      }
+
+      return Math.max(0, priorRow.cashBalance - row.cashBalance);
+    })
+    .filter((burn) => burn > 0);
+  const averageMonthlyBurn =
+    positiveBurns.length > 0
+      ? positiveBurns.reduce((total, burn) => total + burn, 0) /
+        positiveBurns.length
+      : 0;
+  const totalCashChange =
+    firstRow?.cashBalance !== null &&
+    latestRow?.cashBalance !== null &&
+    firstRow?.cashBalance !== undefined &&
+    latestRow?.cashBalance !== undefined
+      ? latestRow.cashBalance - firstRow.cashBalance
+      : 0;
+
+  return (
+    <section className="rounded-md border border-neutral-200 bg-white p-5">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Session Cash Data Loaded</h2>
+          <p className="mt-1 text-sm text-neutral-500">
+            Uploaded cash balances are available in local React state and
+            localStorage for this browser session.
+          </p>
+        </div>
+        <span className="rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
+          Loaded {loadedAt}
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <SummaryCard
+          label="Months loaded"
+          value={sortedRows.map((row) => row.month).join(", ")}
+        />
+        <SummaryCard
+          label="Latest cash balance"
+          value={formatCurrency(latestRow?.cashBalance ?? 0)}
+        />
+        <SummaryCard
+          label="Beginning cash balance"
+          value={formatCurrency(firstRow?.cashBalance ?? 0)}
+        />
+        <SummaryCard
+          label="Total cash change"
+          value={formatCurrency(totalCashChange)}
+        />
+        <SummaryCard
+          label="Avg monthly burn"
+          value={formatCurrency(averageMonthlyBurn)}
+        />
         <SummaryCard label="Loaded at" value={loadedAt} />
       </div>
     </section>
@@ -845,6 +1143,123 @@ function PnlActualsPreview({
                   <td className="px-4 py-3">{row.category || "Missing"}</td>
                   <td className="px-4 py-3 text-right">
                     {row.amount === null ? row.amountRaw || "Missing" : formatCurrency(row.amount)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <ValidationStatusBadge status={row.status} />
+                  </td>
+                  <td className="px-4 py-3 text-neutral-600">
+                    {row.messages.length > 0 ? row.messages.join("; ") : "No issues"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function CashBalancePreview({
+  parsedCsv,
+  sessionRows,
+}: {
+  parsedCsv: ParsedCashCsv | null;
+  sessionRows: UploadedCashRow[];
+}) {
+  if (!parsedCsv) {
+    return (
+      <section className="rounded-md border border-neutral-200 bg-white p-5">
+        <h2 className="text-base font-semibold">Cash Balance CSV Preview</h2>
+        <p className="mt-2 text-sm leading-6 text-neutral-600">
+          Upload a local Cash Balance CSV to preview parsed cash rows and
+          validation status.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-4">
+      <div className="rounded-md border border-neutral-200 bg-white p-5">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Cash Balance CSV Preview</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+              Local browser parse results for monthly cash balances.
+            </p>
+          </div>
+          {sessionRows.length > 0 ? (
+            <span className="rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
+              {sessionRows.length} cash rows loaded in session
+            </span>
+          ) : null}
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
+          <SummaryCard label="Total rows" value={parsedCsv.summary.totalRows} />
+          <SummaryCard label="Valid rows" value={parsedCsv.summary.validRows} />
+          <SummaryCard
+            label="Rows with warnings"
+            value={parsedCsv.summary.warningRows}
+          />
+          <SummaryCard
+            label="Rows with errors"
+            value={parsedCsv.summary.errorRows}
+          />
+        </div>
+
+        {parsedCsv.errors.length > 0 ? (
+          <div className="mt-5 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3">
+            <p className="text-sm font-medium text-neutral-950">
+              Parser messages
+            </p>
+            <ul className="mt-2 space-y-1 text-sm text-neutral-600">
+              {parsedCsv.errors.map((error) => (
+                <li key={error} className="ml-4 list-disc">
+                  {error}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+
+      <section className="overflow-hidden rounded-md border border-neutral-200 bg-white">
+        <div className="border-b border-neutral-200 px-5 py-4">
+          <h2 className="text-base font-semibold">Parsed Cash Rows</h2>
+          <p className="mt-1 text-sm text-neutral-500">
+            Validation is based on required fields, month format, duplicates,
+            cash balance type, negative balances, and large monthly movements.
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-600">
+              <tr>
+                <th className="px-4 py-3 font-medium">Month</th>
+                <th className="px-4 py-3 text-right font-medium">Cash Balance</th>
+                <th className="px-4 py-3 text-right font-medium">
+                  Month-over-Month Change
+                </th>
+                <th className="px-4 py-3 font-medium">Validation Status</th>
+                <th className="px-4 py-3 font-medium">Messages</th>
+              </tr>
+            </thead>
+            <tbody>
+              {parsedCsv.rows.map((row) => (
+                <tr key={row.rowNumber} className="border-b border-neutral-100">
+                  <td className="px-4 py-3">{row.month || "Missing"}</td>
+                  <td className="px-4 py-3 text-right">
+                    {row.cashBalance === null
+                      ? row.cashBalanceRaw || "Missing"
+                      : formatCurrency(row.cashBalance)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {row.monthlyChange === null
+                      ? "N/A"
+                      : formatCurrency(row.monthlyChange)}
                   </td>
                   <td className="px-4 py-3">
                     <ValidationStatusBadge status={row.status} />
@@ -975,6 +1390,12 @@ function formatLoadedAt(value: string) {
 
 function isRevenueCategory(category: string) {
   return category.toLowerCase().includes("revenue");
+}
+
+function getSortedCashRows(rows: UploadedCashRow[]) {
+  return [...rows]
+    .filter((row) => row.cashBalance !== null)
+    .sort((first, second) => first.month.localeCompare(second.month));
 }
 
 function ValidationStatusBadge({

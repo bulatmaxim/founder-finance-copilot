@@ -21,7 +21,7 @@ export function formatPercent(value: number) {
 
 export function formatRunwayMonths(value: number | null) {
   if (value === null) {
-    return "No burn";
+    return "Cash increasing";
   }
 
   return `${value.toFixed(1)} months`;

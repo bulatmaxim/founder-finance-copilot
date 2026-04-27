@@ -19,11 +19,15 @@ import {
 import { generateFinanceInsights } from "@/lib/financeInsights";
 import {
   getActiveBudgetData,
+  getActiveCashData,
   getActiveFinancialData,
   getActualsSourceLabel,
   getBudgetSourceLabel,
+  getCashMetricsForMonth,
+  getCashSourceLabel,
   getBudgetForMonth,
   type ActiveBudgetData,
+  type ActiveCashData,
   type ActiveFinancialData,
 } from "@/lib/localDataStore";
 import { generateMonthlyCfoDeck } from "@/lib/powerpoint";
@@ -59,6 +63,7 @@ export function CFOBrief() {
     getActiveFinancialData(),
   );
   const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
+  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
   const [selectedMonth, setSelectedMonth] = useState(
     activeData.periods[activeData.periods.length - 1].month,
   );
@@ -114,11 +119,14 @@ export function CFOBrief() {
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
             <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
-            {activeData.dataSource === "uploaded" || activeBudget.dataSource === "uploaded" ? (
+            <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
+            {activeData.dataSource === "uploaded" ||
+            activeBudget.dataSource === "uploaded" ||
+            activeCash.dataSource === "uploaded" ? (
               <p className="text-sm text-neutral-500">
-                Uploaded actuals and budget data are stored locally in your
-                browser for prototype testing only. They are not saved to a
-                database yet.
+                Uploaded actuals, budget, and cash data are stored locally in your
+                browser for prototype testing only. They are not saved to a database
+                yet.
               </p>
             ) : null}
           </div>
@@ -298,6 +306,7 @@ function buildBriefForMonth(month: string): BriefContent {
   const actual = periods[safeIndex];
   const budget = getBudgetForMonth(actual.month, safeIndex);
   const priorActual = safeIndex > 0 ? periods[safeIndex - 1] : null;
+  const cashMetrics = getCashMetricsForMonth(actual.month);
   const insightResult = generateFinanceInsights({ reportingMonth: month });
 
   if (!actual || !budget) {
@@ -328,9 +337,9 @@ function buildBriefForMonth(month: string): BriefContent {
     "higher",
   );
 
-  const cashChange = priorActual
-    ? actual.cashBalance - priorActual.cashBalance
-    : 0;
+  const cashChange =
+    cashMetrics?.monthlyCashChange ??
+    (priorActual ? actual.cashBalance - priorActual.cashBalance : 0);
   const bothRevenueAndExpensesUnfavorable =
     revenue.status === "Unfavorable" &&
     operatingExpenses.status === "Unfavorable";
@@ -386,7 +395,11 @@ function buildBriefForMonth(month: string): BriefContent {
         ? `Cash increased month over month by ${formatCurrency(cashChange)}, ending at ${formatCurrency(actual.cashBalance)}.`
         : `Cash ended at ${formatCurrency(actual.cashBalance)}, with no prior-month movement available for this period.`,
     `Net burn was ${formatCurrency(actual.netBurn)}, ${netBurn.status === "Favorable" ? "below" : netBurn.status === "Unfavorable" ? "above" : "in line with"} budget by ${formatVarianceLabel(netBurn.dollars)}.`,
+    `Three-month average net burn is ${formatCurrency(cashMetrics?.threeMonthAverageNetBurn ?? actual.netBurn)}.`,
     `Runway stands at ${formatRunwayMonths(actual.runwayMonths)}, compared with ${formatRunwayMonths(budget.runwayMonths)} in the budget.`,
+    cashMetrics?.estimatedCashOutDate
+      ? `Estimated cash-out date is ${cashMetrics.estimatedCashOutDate}.`
+      : "Estimated cash-out date is not available because cash is not declining on average.",
   ];
 
   const budgetCommentary = [

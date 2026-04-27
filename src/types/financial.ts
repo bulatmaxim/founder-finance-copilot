@@ -23,3 +23,19 @@ export type ParsedFinancialCsv = {
   summary: UploadValidationSummary;
   errors: string[];
 };
+
+export type UploadedCashRow = {
+  rowNumber: number;
+  month: string;
+  cashBalanceRaw: string;
+  cashBalance: number | null;
+  monthlyChange: number | null;
+  status: UploadValidationStatus;
+  messages: string[];
+};
+
+export type ParsedCashCsv = {
+  rows: UploadedCashRow[];
+  summary: UploadValidationSummary;
+  errors: string[];
+};
