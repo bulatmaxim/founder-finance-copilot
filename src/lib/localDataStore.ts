@@ -119,6 +119,39 @@ export type ActiveForecastData = {
   forecastVersion: string;
 };
 
+export type AICfoBriefInsight = {
+  title: string;
+  severity: "Low" | "Medium" | "High";
+  category:
+    | "Revenue"
+    | "Expenses"
+    | "Cash"
+    | "Runway"
+    | "Forecast"
+    | "Payroll"
+    | "Pipeline"
+    | "Investor Update"
+    | "Data Quality";
+  summary: string;
+  whyItMatters: string;
+  recommendedAction: string;
+  sourceMetrics: string[];
+};
+
+export type AICfoBrief = {
+  executiveSummary: string;
+  priorityInsights: AICfoBriefInsight[];
+  runwayWarning: string;
+  forecastRecommendation: string;
+  managementQuestions: string[];
+  recommendedActions: string[];
+  investorUpdateBullets: string[];
+  boardSlideSummary: string;
+  dataQualityNotes: string[];
+  generatedAt?: string;
+  reportingPeriod?: string;
+};
+
 const uploadedActualsKey = "founder-finance-copilot:uploaded-actuals";
 const uploadedBudgetKey = "founder-finance-copilot:uploaded-budget";
 const uploadedCashKey = "founder-finance-copilot:uploaded-cash";
@@ -128,6 +161,7 @@ const uploadedPipelineKey = "founder-finance-copilot:uploaded-pipeline";
 const uploadedBankTransactionsKey =
   "founder-finance-copilot:uploaded-bank-transactions";
 const uploadedForecastKey = "founder-finance-copilot:uploaded-forecast";
+const latestAiBriefKey = "founder-finance-copilot:latest-ai-cfo-brief";
 
 export function saveUploadedActuals(rows: UploadedFinancialRow[]) {
   if (!canUseLocalStorage()) {
@@ -406,6 +440,77 @@ export function clearUploadedForecast() {
 
 export function hasUploadedForecast() {
   return getUploadedForecast().length > 0;
+}
+
+export function saveLatestAIBrief(brief: AICfoBrief) {
+  if (!canUseLocalStorage()) {
+    return;
+  }
+
+  window.localStorage.setItem(
+    latestAiBriefKey,
+    JSON.stringify({
+      ...brief,
+      generatedAt: brief.generatedAt ?? new Date().toISOString(),
+    }),
+  );
+}
+
+export function getLatestAIBrief(): AICfoBrief | null {
+  if (!canUseLocalStorage()) {
+    return null;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(latestAiBriefKey);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<AICfoBrief>;
+
+    if (typeof parsed.executiveSummary !== "string") {
+      clearLatestAIBrief();
+      return null;
+    }
+
+    return {
+      executiveSummary: parsed.executiveSummary,
+      priorityInsights: Array.isArray(parsed.priorityInsights)
+        ? parsed.priorityInsights
+        : [],
+      runwayWarning: parsed.runwayWarning ?? "",
+      forecastRecommendation: parsed.forecastRecommendation ?? "",
+      managementQuestions: Array.isArray(parsed.managementQuestions)
+        ? parsed.managementQuestions
+        : [],
+      recommendedActions: Array.isArray(parsed.recommendedActions)
+        ? parsed.recommendedActions
+        : [],
+      investorUpdateBullets: Array.isArray(parsed.investorUpdateBullets)
+        ? parsed.investorUpdateBullets
+        : [],
+      boardSlideSummary: parsed.boardSlideSummary ?? "",
+      dataQualityNotes: Array.isArray(parsed.dataQualityNotes)
+        ? parsed.dataQualityNotes
+        : [],
+      generatedAt: parsed.generatedAt,
+      reportingPeriod: parsed.reportingPeriod,
+    };
+  } catch (error) {
+    console.error("Failed to read latest AI CFO brief from localStorage", error);
+    clearLatestAIBrief();
+    return null;
+  }
+}
+
+export function clearLatestAIBrief() {
+  if (!canUseLocalStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem(latestAiBriefKey);
 }
 
 export function getActiveFinancialData(): ActiveFinancialData {

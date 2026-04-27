@@ -26,10 +26,12 @@ import {
   getCashMetricsForMonth,
   getCashSourceLabel,
   getBudgetForMonth,
+  getLatestAIBrief,
   getUploadedBankTransactions,
   getUploadedPayroll,
   getUploadedPipeline,
   getUploadedRevenueDetail,
+  type AICfoBrief,
   type ActiveBudgetData,
   type ActiveCashData,
   type ActiveFinancialData,
@@ -89,7 +91,8 @@ export function CFOBrief() {
     setDeckMessage("Generating PowerPoint deck from local sample data...");
 
     try {
-      const deckBrief = buildBriefForMonth(deckMonth);
+      const deckBrief =
+        aiBriefToBriefContent(getLatestAIBrief()) ?? buildBriefForMonth(deckMonth);
       const fileName = await generateMonthlyCfoDeck({
         reportingMonth: deckMonth,
         brief: deckBrief,
@@ -587,6 +590,38 @@ function buildUploadedDataNotes() {
       ? `Bank transactions uploaded: ${bankRows.length} rows available for cash outflow review.`
       : "Bank transactions not uploaded.",
   ];
+}
+
+function aiBriefToBriefContent(aiBrief: AICfoBrief | null): BriefContent | null {
+  if (!aiBrief) {
+    return null;
+  }
+
+  return {
+    executiveSummary: [aiBrief.executiveSummary],
+    highlights: [],
+    revenueCommentary: aiBrief.priorityInsights
+      .filter((insight) => insight.category === "Revenue")
+      .map((insight) => insight.summary),
+    expenseCommentary: aiBrief.priorityInsights
+      .filter((insight) => insight.category === "Expenses" || insight.category === "Payroll")
+      .map((insight) => insight.summary),
+    cashRunwayCommentary: [
+      aiBrief.runwayWarning,
+      ...aiBrief.priorityInsights
+        .filter((insight) => insight.category === "Cash" || insight.category === "Runway")
+        .map((insight) => insight.summary),
+    ].filter(Boolean),
+    budgetCommentary: aiBrief.priorityInsights
+      .filter((insight) => insight.category === "Forecast")
+      .map((insight) => insight.summary),
+    risks: aiBrief.priorityInsights
+      .filter((insight) => insight.severity !== "Low")
+      .map((insight) => insight.summary)
+      .slice(0, 5),
+    actions: aiBrief.recommendedActions,
+    investorBullets: aiBrief.investorUpdateBullets,
+  };
 }
 
 function formatValue(value: number, format: "currency" | "percent" | "months") {
