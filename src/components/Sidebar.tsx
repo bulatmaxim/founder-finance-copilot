@@ -2,13 +2,13 @@ import Link from "next/link";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard" },
-  { name: "Companies", href: "/companies" },
   { name: "Uploads", href: "/uploads" },
   { name: "Data Mapping", href: "/mapping" },
   { name: "Budget vs Actuals", href: "/budget-vs-actuals" },
   { name: "Forecasts", href: "/forecasts" },
   { name: "Decision Center", href: "/decision-center" },
   { name: "Reports", href: "/reports" },
+  { name: "Company Profile", href: "/company-profile" },
   { name: "Settings", href: "/settings" },
 ];
 

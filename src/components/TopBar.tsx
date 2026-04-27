@@ -1,4 +1,4 @@
-import { CompanySwitcher } from "@/components/CompanySwitcher";
+import { sampleCompany } from "@/data/sampleCompany";
 
 export function TopBar() {
   return (
@@ -9,10 +9,15 @@ export function TopBar() {
             Founder Finance Copilot
           </p>
           <p className="mt-1 text-sm text-neutral-500">
-            Current reporting period: March 2026
+            {sampleCompany.name}
           </p>
         </div>
-        <CompanySwitcher />
+        <div className="rounded-md border border-neutral-200 bg-white px-4 py-3 text-sm">
+          <p className="font-medium text-neutral-950">
+            Current Reporting Period: Latest Month
+          </p>
+          <p className="mt-1 text-neutral-500">Single-company workspace</p>
+        </div>
       </div>
     </header>
   );
