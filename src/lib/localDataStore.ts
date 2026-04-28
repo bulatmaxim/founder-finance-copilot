@@ -975,7 +975,11 @@ function classifyCategory(category: string) {
     normalized.includes("cost of revenue") ||
     normalized.includes("hosting") ||
     normalized.includes("cloud") ||
-    normalized.includes("infrastructure")
+    normalized.includes("infrastructure") ||
+    normalized.includes("payment processing") ||
+    normalized.includes("customer support") ||
+    normalized.includes("third-party data") ||
+    normalized.includes("third party data")
   ) {
     return "costOfRevenue";
   }

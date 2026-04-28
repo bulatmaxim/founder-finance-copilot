@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { MetricCard } from "@/components/MetricCard";
+import { AccountMappingNotice } from "@/components/AccountMappingNotice";
 import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
 import { VarianceTable, type VarianceRow } from "@/components/VarianceTable";
 import { sampleBudget } from "@/data/sampleBudget";
@@ -266,6 +267,8 @@ export function DashboardPageContent() {
         reportingMonth={latestActual.month}
         sources={[activeData.dataSource, activeBudget.dataSource, activeCash.dataSource]}
       />
+
+      <AccountMappingNotice />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => (

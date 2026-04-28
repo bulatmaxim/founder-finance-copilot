@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AccountMappingNotice } from "@/components/AccountMappingNotice";
 import { DashboardChart } from "@/components/DashboardChart";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
@@ -248,6 +249,8 @@ export default function ForecastsPage() {
         reportingMonth={activeData.periods.at(-1)?.month}
         sources={[activeData.dataSource, activeBudget.dataSource, activeCash.dataSource]}
       />
+
+      <AccountMappingNotice />
 
       {isCompanyDataSource(activeData.dataSource) ? (
         <section className="rounded-md border border-neutral-200 bg-white p-5">

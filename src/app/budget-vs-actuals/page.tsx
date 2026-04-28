@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AccountMappingNotice } from "@/components/AccountMappingNotice";
 import { DashboardChart } from "@/components/DashboardChart";
 import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
 import {
@@ -309,6 +310,8 @@ export default function BudgetVsActualsPage() {
         reportingMonth={selectedMonth}
         sources={[activeData.dataSource, activeBudget.dataSource, activeCash.dataSource]}
       />
+
+      <AccountMappingNotice />
 
       {activeData.dataSource === "sample" && activeBudget.dataSource !== "sample" ? (
         <section className="rounded-md border border-neutral-200 bg-white p-5 text-sm text-neutral-700">

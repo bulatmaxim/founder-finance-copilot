@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AccountMappingNotice } from "@/components/AccountMappingNotice";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
 import { sampleCompany } from "@/data/sampleCompany";
@@ -244,6 +245,8 @@ export function CFOBrief() {
         reportingMonth={generatedMonth}
         sources={[activeData.dataSource, activeBudget.dataSource, activeCash.dataSource]}
       />
+
+      <AccountMappingNotice />
 
       <section className="rounded-md border border-neutral-200 bg-white p-5">
         <h2 className="text-base font-semibold">Monthly CFO Brief</h2>

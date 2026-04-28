@@ -1,6 +1,10 @@
 "use client";
 
 import {
+  loadAccountMappingLookup,
+  normalizeAccountName,
+} from "@/lib/accountMapping";
+import {
   saveLatestAIBrief,
   saveUploadedActuals,
   saveUploadedBankTransactions,
@@ -37,6 +41,7 @@ export async function hydrateLocalDataFromSupabase() {
   }
 
   const [
+    accountMappingLookup,
     actualsSource,
     budgetSource,
     cashSource,
@@ -47,6 +52,7 @@ export async function hydrateLocalDataFromSupabase() {
     forecast,
     aiBriefRow,
   ] = await Promise.all([
+    loadAccountMappingLookup(),
     getReportingRowsForMonthlyClose({
       table: "financial_actuals",
       fileCategory: "actuals",
@@ -68,7 +74,9 @@ export async function hydrateLocalDataFromSupabase() {
   ]);
 
   if (actualsSource.rows.length > 0) {
-    saveUploadedActuals(actualsSource.rows.map(mapFinancialRow), {
+    saveUploadedActuals(actualsSource.rows.map((row, index) =>
+      mapFinancialRow(row, index, accountMappingLookup),
+    ), {
       sourceMode: actualsSource.sourceMode,
       reportingMonths: actualsSource.reportingMonths,
       closeStatus: actualsSource.closeStatus,
@@ -76,7 +84,9 @@ export async function hydrateLocalDataFromSupabase() {
   }
 
   if (budgetSource.rows.length > 0) {
-    saveUploadedBudget(budgetSource.rows.map(mapFinancialRow), {
+    saveUploadedBudget(budgetSource.rows.map((row, index) =>
+      mapFinancialRow(row, index, accountMappingLookup),
+    ), {
       sourceMode: budgetSource.sourceMode,
       reportingMonths: budgetSource.reportingMonths,
       closeStatus: budgetSource.closeStatus,
@@ -108,7 +118,11 @@ export async function hydrateLocalDataFromSupabase() {
   }
 
   if (forecast.length > 0) {
-    saveUploadedForecast(forecast.map(mapForecastRow));
+    saveUploadedForecast(
+      forecast.map((row, index) =>
+        mapForecastRow(row, index, accountMappingLookup),
+      ),
+    );
   }
 
   if (aiBriefRow?.ai_output) {
@@ -118,14 +132,20 @@ export async function hydrateLocalDataFromSupabase() {
   window.dispatchEvent(new Event("founder-finance-data-hydrated"));
 }
 
-function mapFinancialRow(row: Record<string, unknown>, index: number): UploadedFinancialRow {
+function mapFinancialRow(
+  row: Record<string, unknown>,
+  index: number,
+  accountMappingLookup: Map<string, string>,
+): UploadedFinancialRow {
   const amount = toNumber(row.amount);
+  const account = String(row.account ?? "");
+  const mappedCategory = accountMappingLookup.get(normalizeAccountName(account));
 
   return {
     rowNumber: index + 1,
     month: String(row.month ?? ""),
-    account: String(row.account ?? ""),
-    category: String(row.category ?? ""),
+    account,
+    category: mappedCategory ?? String(row.category ?? ""),
     amountRaw: amount === null ? "" : String(amount),
     amount,
     status: "Valid",
@@ -133,14 +153,20 @@ function mapFinancialRow(row: Record<string, unknown>, index: number): UploadedF
   };
 }
 
-function mapForecastRow(row: Record<string, unknown>, index: number): UploadedForecastRow {
+function mapForecastRow(
+  row: Record<string, unknown>,
+  index: number,
+  accountMappingLookup: Map<string, string>,
+): UploadedForecastRow {
   const amount = toNumber(row.amount);
+  const account = String(row.account ?? "");
+  const mappedCategory = accountMappingLookup.get(normalizeAccountName(account));
 
   return {
     rowNumber: index + 1,
     month: String(row.month ?? ""),
-    account: String(row.account ?? ""),
-    category: String(row.category ?? ""),
+    account,
+    category: mappedCategory ?? String(row.category ?? ""),
     amountRaw: amount === null ? "" : String(amount),
     amount,
     forecastVersion: String(row.forecast_version ?? "Uploaded Forecast"),

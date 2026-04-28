@@ -4,7 +4,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard" },
   { name: "Uploads", href: "/uploads" },
   { name: "Data Room", href: "/data-room" },
-  { name: "Data Mapping", href: "/mapping" },
+  { name: "Account Mapping", href: "/account-mapping" },
   { name: "Budget vs Actuals", href: "/budget-vs-actuals" },
   { name: "Forecasts", href: "/forecasts" },
   { name: "Decision Center", href: "/decision-center" },
