@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
+import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
 import {
   forecastVersionOptions,
   sampleForecast,
@@ -31,6 +32,7 @@ import {
   getBudgetSourceLabel,
   getCashSourceLabel,
   getForecastSourceLabel,
+  isCompanyDataSource,
   type ActiveBudgetData,
   type ActiveCashData,
   type ActiveForecastData,
@@ -103,14 +105,27 @@ export default function ForecastsPage() {
   const [selectedVersionId, setSelectedVersionId] =
     useState<ForecastVersionId>("latest");
   const [notice, setNotice] = useState("");
-  const [activeData] = useState<ActiveFinancialData>(() =>
+  const [activeData, setActiveData] = useState<ActiveFinancialData>(() =>
     getActiveFinancialData(),
   );
-  const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
-  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
-  const [activeForecast] = useState<ActiveForecastData>(() =>
+  const [activeBudget, setActiveBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
+  const [activeCash, setActiveCash] = useState<ActiveCashData>(() => getActiveCashData());
+  const [activeForecast, setActiveForecast] = useState<ActiveForecastData>(() =>
     getActiveForecastData(),
   );
+
+  useEffect(() => {
+    function refreshData() {
+      setActiveCash(getActiveCashData());
+      setActiveBudget(getActiveBudgetData());
+      setActiveData(getActiveFinancialData());
+      setActiveForecast(getActiveForecastData());
+    }
+
+    window.addEventListener("founder-finance-data-hydrated", refreshData);
+
+    return () => window.removeEventListener("founder-finance-data-hydrated", refreshData);
+  }, []);
 
   const selectedVersion = useMemo(
     () =>
@@ -179,12 +194,13 @@ export default function ForecastsPage() {
             <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
             <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
             <DataSourceBadge label={getForecastSourceLabel(activeForecast.dataSource)} />
-            {activeBudget.dataSource === "uploaded" ||
-            activeCash.dataSource === "uploaded" ||
-            activeForecast.dataSource === "uploaded" ? (
+            {isCompanyDataSource(activeData.dataSource) ||
+            isCompanyDataSource(activeBudget.dataSource) ||
+            isCompanyDataSource(activeCash.dataSource) ||
+            isCompanyDataSource(activeForecast.dataSource) ? (
               <p className="text-sm text-neutral-500">
-                Uploaded planning data is active for local comparisons. Sample
-                scenarios remain available for reference.
+                Approved actualized months are used where available. Future
+                months remain forecast assumptions.
               </p>
             ) : null}
           </div>
@@ -226,6 +242,22 @@ export default function ForecastsPage() {
         <div className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
           {notice}
         </div>
+      ) : null}
+
+      <ReportingSourceNotice
+        reportingMonth={activeData.periods.at(-1)?.month}
+        sources={[activeData.dataSource, activeBudget.dataSource, activeCash.dataSource]}
+      />
+
+      {isCompanyDataSource(activeData.dataSource) ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5">
+          <h2 className="text-base font-semibold">Actualized Months</h2>
+          <p className="mt-1 text-sm text-neutral-500">
+            {activeData.periods.map((period) => period.month).join(", ")} are
+            loaded as company actuals. Future months remain forecast/sample
+            assumptions until a formal forecast version is uploaded.
+          </p>
+        </section>
       ) : null}
 
       {activeForecast.dataSource === "uploaded" ? (

@@ -105,6 +105,7 @@ export function FinanceCopilotPanel({
 
     try {
       const financeSummary = buildFinanceSummary(reportingMonth);
+      const dataWarning = getFinanceSummaryWarning(financeSummary);
       const response = await fetch("/api/ai/cfo-brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -141,8 +142,11 @@ export function FinanceCopilotPanel({
       setAiBrief(brief);
       setToast({
         id: Date.now(),
-        type: "success",
-        title: "AI CFO Brief generated successfully.",
+        type: dataWarning ? "warning" : "success",
+        title: dataWarning
+          ? "AI CFO Brief generated with data warning."
+          : "AI CFO Brief generated successfully.",
+        detail: dataWarning,
       });
     } catch (error) {
       console.error("AI CFO Brief failed", error);
@@ -391,6 +395,18 @@ export function FinanceCopilotPanel({
       ) : null}
     </section>
   );
+}
+
+function getFinanceSummaryWarning(financeSummary: ReturnType<typeof buildFinanceSummary>) {
+  if (financeSummary.dataSourceStatus.isUsingUnapproved) {
+    return `The monthly close for ${financeSummary.displayPeriod} is not fully approved. This CFO Brief may be based on incomplete or unapproved data.`;
+  }
+
+  if (financeSummary.dataSourceStatus.isUsingSample) {
+    return `The CFO Brief for ${financeSummary.displayPeriod} uses demo sample data where approved company uploads are missing.`;
+  }
+
+  return "";
 }
 
 function formatHistoryDate(value: string | null) {

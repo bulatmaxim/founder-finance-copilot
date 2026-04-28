@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
+import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
 import { sampleCompany } from "@/data/sampleCompany";
 import {
   calculateVarianceDollars,
@@ -31,6 +32,7 @@ import {
   getUploadedPayroll,
   getUploadedPipeline,
   getUploadedRevenueDetail,
+  isCompanyDataSource,
   type AICfoBrief,
   type ActiveBudgetData,
   type ActiveCashData,
@@ -67,11 +69,11 @@ type MetricVariance = {
 };
 
 export function CFOBrief() {
-  const [activeData] = useState<ActiveFinancialData>(() =>
+  const [activeData, setActiveData] = useState<ActiveFinancialData>(() =>
     getActiveFinancialData(),
   );
-  const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
-  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
+  const [activeBudget, setActiveBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
+  const [activeCash, setActiveCash] = useState<ActiveCashData>(() => getActiveCashData());
   const [selectedMonth, setSelectedMonth] = useState(
     activeData.periods[activeData.periods.length - 1].month,
   );
@@ -85,12 +87,37 @@ export function CFOBrief() {
   );
   const uploadedDataNotes = buildUploadedDataNotes();
 
+  useEffect(() => {
+    function refreshData() {
+      const refreshedData = getActiveFinancialData();
+      setActiveCash(getActiveCashData());
+      setActiveBudget(getActiveBudgetData());
+      setActiveData(refreshedData);
+      const latestMonth = refreshedData.periods[refreshedData.periods.length - 1]?.month;
+
+      if (latestMonth) {
+        setSelectedMonth(latestMonth);
+        setGeneratedMonth(latestMonth);
+      }
+    }
+
+    window.addEventListener("founder-finance-data-hydrated", refreshData);
+
+    return () => window.removeEventListener("founder-finance-data-hydrated", refreshData);
+  }, []);
+
   async function handleDeckGeneration() {
     const deckMonth = selectedMonth;
 
     setGeneratedMonth(deckMonth);
     setIsGeneratingDeck(true);
-    setDeckMessage("Generating PowerPoint deck from local sample data...");
+    setDeckMessage(
+      `Generating PowerPoint deck for ${deckMonth} from ${sourceSummary([
+        activeData.dataSource,
+        activeBudget.dataSource,
+        activeCash.dataSource,
+      ])}...`,
+    );
 
     try {
       const deckBrief =
@@ -107,6 +134,17 @@ export function CFOBrief() {
             title: "Monthly CFO Deck",
             fileName,
             file: blob,
+            dataSource: {
+              actuals: getActualsSourceLabel(activeData.dataSource),
+              budget: getBudgetSourceLabel(activeBudget.dataSource),
+              cash: getCashSourceLabel(activeCash.dataSource),
+              warning:
+                activeData.dataSource === "unapproved" ||
+                activeBudget.dataSource === "unapproved" ||
+                activeCash.dataSource === "unapproved"
+                  ? `Monthly close is not complete for ${deckMonth}.`
+                  : null,
+            },
           });
           setDeckMessage(
             `${fileName} was generated, downloaded, and saved to Supabase.`,
@@ -148,12 +186,15 @@ export function CFOBrief() {
             <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
             <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
             <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
-            {activeData.dataSource === "uploaded" ||
-            activeBudget.dataSource === "uploaded" ||
-            activeCash.dataSource === "uploaded" ? (
+            {isCompanyDataSource(activeData.dataSource) ||
+            isCompanyDataSource(activeBudget.dataSource) ||
+            isCompanyDataSource(activeCash.dataSource) ? (
               <p className="text-sm text-neutral-500">
-                Uploaded actuals, budget, and cash data are stored locally and
-                saved to Supabase when the workspace is configured.
+                Source: {sourceSummary([
+                  activeData.dataSource,
+                  activeBudget.dataSource,
+                  activeCash.dataSource,
+                ])}.
               </p>
             ) : null}
           </div>
@@ -198,6 +239,11 @@ export function CFOBrief() {
           {deckMessage}
         </div>
       ) : null}
+
+      <ReportingSourceNotice
+        reportingMonth={generatedMonth}
+        sources={[activeData.dataSource, activeBudget.dataSource, activeCash.dataSource]}
+      />
 
       <section className="rounded-md border border-neutral-200 bg-white p-5">
         <h2 className="text-base font-semibold">Monthly CFO Brief</h2>
@@ -510,6 +556,14 @@ function DataSourceBadge({ label }: { label: string }) {
       {label}
     </span>
   );
+}
+
+function sourceSummary(sources: string[]) {
+  if (sources.includes("approved")) return "Approved Data Room";
+  if (sources.includes("unapproved")) return "Unapproved upload - review pending";
+  if (sources.includes("saved")) return "Saved company uploads";
+  if (sources.includes("uploaded")) return "Uploaded CSV data";
+  return "Demo sample data";
 }
 
 function metricVariance(

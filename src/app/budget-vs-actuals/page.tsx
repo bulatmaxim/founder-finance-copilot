@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
+import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
 import {
   aggregateFinancialPeriods,
   calculateMonthlyVariance,
@@ -25,6 +26,7 @@ import {
   getBudgetSourceLabel,
   getCashSourceLabel,
   getBudgetForMonth,
+  isCompanyDataSource,
   type ActiveBudgetData,
   type ActiveCashData,
   type ActiveFinancialData,
@@ -144,15 +146,29 @@ const metrics: MetricDefinition[] = [
 ];
 
 export default function BudgetVsActualsPage() {
-  const [activeData] = useState<ActiveFinancialData>(() =>
+  const [activeData, setActiveData] = useState<ActiveFinancialData>(() =>
     getActiveFinancialData(),
   );
-  const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
-  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
+  const [activeBudget, setActiveBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
+  const [activeCash, setActiveCash] = useState<ActiveCashData>(() => getActiveCashData());
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [selectedMonth, setSelectedMonth] = useState(
     activeData.periods[activeData.periods.length - 1].month,
   );
+
+  useEffect(() => {
+    function refreshData() {
+      const refreshedData = getActiveFinancialData();
+      setActiveCash(getActiveCashData());
+      setActiveBudget(getActiveBudgetData());
+      setActiveData(refreshedData);
+      setSelectedMonth(refreshedData.periods[refreshedData.periods.length - 1]?.month ?? "");
+    }
+
+    window.addEventListener("founder-finance-data-hydrated", refreshData);
+
+    return () => window.removeEventListener("founder-finance-data-hydrated", refreshData);
+  }, []);
 
   const activeFinancials = activeData.periods;
   const selectedIndex = activeFinancials.findIndex(
@@ -240,12 +256,15 @@ export default function BudgetVsActualsPage() {
             <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
             <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
             <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
-            {activeData.dataSource === "uploaded" ||
-            activeBudget.dataSource === "uploaded" ||
-            activeCash.dataSource === "uploaded" ? (
+            {isCompanyDataSource(activeData.dataSource) ||
+            isCompanyDataSource(activeBudget.dataSource) ||
+            isCompanyDataSource(activeCash.dataSource) ? (
               <p className="text-sm text-neutral-500">
-                Uploaded actuals, budget, and cash data are restored from Supabase
-                when configured, with a local browser fallback for development.
+                Source: {sourceSummary([
+                  activeData.dataSource,
+                  activeBudget.dataSource,
+                  activeCash.dataSource,
+                ])}.
               </p>
             ) : null}
           </div>
@@ -285,6 +304,23 @@ export default function BudgetVsActualsPage() {
           </label>
         </div>
       </div>
+
+      <ReportingSourceNotice
+        reportingMonth={selectedMonth}
+        sources={[activeData.dataSource, activeBudget.dataSource, activeCash.dataSource]}
+      />
+
+      {activeData.dataSource === "sample" && activeBudget.dataSource !== "sample" ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5 text-sm text-neutral-700">
+          Budget exists, but approved actuals are missing for the selected reporting period.
+        </section>
+      ) : null}
+
+      {activeBudget.dataSource === "sample" && activeData.dataSource !== "sample" ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5 text-sm text-neutral-700">
+          Actuals exist, but approved budget data is missing for the selected reporting period.
+        </section>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-3">
         <SummaryCard label="Actual revenue" value={formatCurrency(actual.revenue)} />
@@ -492,6 +528,14 @@ function DataSourceBadge({ label }: { label: string }) {
       {label}
     </span>
   );
+}
+
+function sourceSummary(sources: string[]) {
+  if (sources.includes("approved")) return "Approved Data Room";
+  if (sources.includes("unapproved")) return "Unapproved upload - review pending";
+  if (sources.includes("saved")) return "Saved company uploads";
+  if (sources.includes("uploaded")) return "Uploaded CSV data";
+  return "Demo sample data";
 }
 
 function selectPeriods<T>(

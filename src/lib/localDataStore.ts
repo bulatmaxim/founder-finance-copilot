@@ -18,21 +18,40 @@ import type {
   UploadedRevenueDetailRow,
 } from "@/types/financial";
 
-export type DataSourceMode = "sample" | "uploaded";
+export type DataSourceMode = "sample" | "uploaded" | "approved" | "saved" | "unapproved";
+
+export type DataSourceMetadata = {
+  sourceMode?: Exclude<DataSourceMode, "sample">;
+  reportingMonths?: string[];
+  sourceLabel?: string;
+  closeStatus?: string;
+};
 
 export type UploadedActualsPayload = {
   rows: UploadedFinancialRow[];
   savedAt: string;
+  sourceMode?: Exclude<DataSourceMode, "sample">;
+  reportingMonths?: string[];
+  sourceLabel?: string;
+  closeStatus?: string;
 };
 
 export type UploadedBudgetPayload = {
   rows: UploadedFinancialRow[];
   savedAt: string;
+  sourceMode?: Exclude<DataSourceMode, "sample">;
+  reportingMonths?: string[];
+  sourceLabel?: string;
+  closeStatus?: string;
 };
 
 export type UploadedCashPayload = {
   rows: UploadedCashRow[];
   savedAt: string;
+  sourceMode?: Exclude<DataSourceMode, "sample">;
+  reportingMonths?: string[];
+  sourceLabel?: string;
+  closeStatus?: string;
 };
 
 export type UploadedPayrollPayload = {
@@ -58,6 +77,10 @@ export type UploadedBankTransactionsPayload = {
 export type UploadedForecastPayload = {
   rows: UploadedForecastRow[];
   savedAt: string;
+  sourceMode?: Exclude<DataSourceMode, "sample">;
+  reportingMonths?: string[];
+  sourceLabel?: string;
+  closeStatus?: string;
 };
 
 export type CashPeriod = {
@@ -163,7 +186,10 @@ const uploadedBankTransactionsKey =
 const uploadedForecastKey = "founder-finance-copilot:uploaded-forecast";
 const latestAiBriefKey = "founder-finance-copilot:latest-ai-cfo-brief";
 
-export function saveUploadedActuals(rows: UploadedFinancialRow[]) {
+export function saveUploadedActuals(
+  rows: UploadedFinancialRow[],
+  metadata: DataSourceMetadata = {},
+) {
   if (!canUseLocalStorage()) {
     return;
   }
@@ -171,6 +197,7 @@ export function saveUploadedActuals(rows: UploadedFinancialRow[]) {
   const payload: UploadedActualsPayload = {
     rows,
     savedAt: new Date().toISOString(),
+    ...metadata,
   };
 
   window.localStorage.setItem(uploadedActualsKey, JSON.stringify(payload));
@@ -202,6 +229,10 @@ export function getUploadedActualsPayload(): UploadedActualsPayload | null {
     return {
       rows: parsed.rows,
       savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : "",
+      sourceMode: normalizeSourceMode(parsed.sourceMode),
+      reportingMonths: normalizeStringArray(parsed.reportingMonths),
+      sourceLabel: typeof parsed.sourceLabel === "string" ? parsed.sourceLabel : undefined,
+      closeStatus: typeof parsed.closeStatus === "string" ? parsed.closeStatus : undefined,
     };
   } catch (error) {
     console.error("Failed to read uploaded actuals from localStorage", error);
@@ -222,7 +253,10 @@ export function hasUploadedActuals() {
   return getUploadedActuals().length > 0;
 }
 
-export function saveUploadedBudget(rows: UploadedFinancialRow[]) {
+export function saveUploadedBudget(
+  rows: UploadedFinancialRow[],
+  metadata: DataSourceMetadata = {},
+) {
   if (!canUseLocalStorage()) {
     return;
   }
@@ -230,6 +264,7 @@ export function saveUploadedBudget(rows: UploadedFinancialRow[]) {
   const payload: UploadedBudgetPayload = {
     rows,
     savedAt: new Date().toISOString(),
+    ...metadata,
   };
 
   window.localStorage.setItem(uploadedBudgetKey, JSON.stringify(payload));
@@ -261,6 +296,10 @@ export function getUploadedBudgetPayload(): UploadedBudgetPayload | null {
     return {
       rows: parsed.rows,
       savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : "",
+      sourceMode: normalizeSourceMode(parsed.sourceMode),
+      reportingMonths: normalizeStringArray(parsed.reportingMonths),
+      sourceLabel: typeof parsed.sourceLabel === "string" ? parsed.sourceLabel : undefined,
+      closeStatus: typeof parsed.closeStatus === "string" ? parsed.closeStatus : undefined,
     };
   } catch (error) {
     console.error("Failed to read uploaded budget from localStorage", error);
@@ -281,7 +320,10 @@ export function hasUploadedBudget() {
   return getUploadedBudget().length > 0;
 }
 
-export function saveUploadedCash(rows: UploadedCashRow[]) {
+export function saveUploadedCash(
+  rows: UploadedCashRow[],
+  metadata: DataSourceMetadata = {},
+) {
   if (!canUseLocalStorage()) {
     return;
   }
@@ -289,6 +331,7 @@ export function saveUploadedCash(rows: UploadedCashRow[]) {
   const payload: UploadedCashPayload = {
     rows,
     savedAt: new Date().toISOString(),
+    ...metadata,
   };
 
   window.localStorage.setItem(uploadedCashKey, JSON.stringify(payload));
@@ -320,6 +363,10 @@ export function getUploadedCashPayload(): UploadedCashPayload | null {
     return {
       rows: parsed.rows,
       savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : "",
+      sourceMode: normalizeSourceMode(parsed.sourceMode),
+      reportingMonths: normalizeStringArray(parsed.reportingMonths),
+      sourceLabel: typeof parsed.sourceLabel === "string" ? parsed.sourceLabel : undefined,
+      closeStatus: typeof parsed.closeStatus === "string" ? parsed.closeStatus : undefined,
     };
   } catch (error) {
     console.error("Failed to read uploaded cash from localStorage", error);
@@ -539,11 +586,11 @@ export function getActiveFinancialData(): ActiveFinancialData {
 
   const activeData: ActiveFinancialData = {
     periods: converted.periods,
-    dataSource: "uploaded",
+    dataSource: payload.sourceMode ?? "uploaded",
     uploadedRows: payload.rows,
     savedAt: payload.savedAt,
     warnings:
-      activeCash.dataSource === "uploaded"
+      isCompanyDataSource(activeCash.dataSource)
         ? converted.warnings
         : [
             ...converted.warnings,
@@ -577,7 +624,7 @@ export function getActiveCashData(): ActiveCashData {
 
   return {
     periods: converted.periods,
-    dataSource: "uploaded",
+    dataSource: payload.sourceMode ?? "uploaded",
     uploadedRows: payload.rows,
     savedAt: payload.savedAt,
     warnings: converted.warnings,
@@ -587,9 +634,11 @@ export function getActiveCashData(): ActiveCashData {
 }
 
 export function getCashSourceLabel(dataSource: DataSourceMode) {
-  return dataSource === "uploaded"
-    ? "Cash Source: Uploaded Cash CSV"
-    : "Cash Source: Sample Data";
+  if (dataSource === "approved") return "Cash Source: Approved Data Room";
+  if (dataSource === "saved") return "Cash Source: Saved company uploads";
+  if (dataSource === "unapproved") return "Cash Source: Unapproved upload - review pending";
+  if (dataSource === "uploaded") return "Cash Source: Uploaded Cash CSV";
+  return "Cash Source: Demo sample data";
 }
 
 export function getCashMetricsForMonth(month: string) {
@@ -652,7 +701,7 @@ export function getActiveForecastData(): ActiveForecastData {
 
   return {
     periods: converted.periods,
-    dataSource: "uploaded",
+    dataSource: payload.sourceMode ?? "uploaded",
     uploadedRows: payload.rows,
     savedAt: payload.savedAt,
     warnings: converted.warnings,
@@ -679,7 +728,7 @@ function applyCashDataToActiveFinancialData(
     const cashPeriod = cashByMonth.get(period.month);
 
     if (!cashPeriod) {
-      if (activeCash.dataSource === "uploaded") {
+      if (isCompanyDataSource(activeCash.dataSource)) {
         missingCashMonths.push(period.month);
       }
 
@@ -694,7 +743,7 @@ function applyCashDataToActiveFinancialData(
     };
   });
   const cashWarnings =
-    activeCash.dataSource === "uploaded" && missingCashMonths.length > 0
+    isCompanyDataSource(activeCash.dataSource) && missingCashMonths.length > 0
       ? [
           `Uploaded cash CSV does not include ${missingCashMonths
             .slice(0, 3)
@@ -752,21 +801,27 @@ export function getBudgetForMonth(month: string, fallbackIndex = 0) {
 }
 
 export function getDataSourceLabel(dataSource: DataSourceMode) {
-  return dataSource === "uploaded"
-    ? "Data Source: Uploaded CSV Data"
-    : "Data Source: Sample Data";
+  if (dataSource === "approved") return "Data Source: Approved Data Room";
+  if (dataSource === "saved") return "Data Source: Saved company uploads";
+  if (dataSource === "unapproved") return "Data Source: Unapproved upload - review pending";
+  if (dataSource === "uploaded") return "Data Source: Uploaded CSV Data";
+  return "Data Source: Demo sample data";
 }
 
 export function getActualsSourceLabel(dataSource: DataSourceMode) {
-  return dataSource === "uploaded"
-    ? "Actuals Source: Uploaded Actuals CSV"
-    : "Actuals Source: Sample Data";
+  if (dataSource === "approved") return "Actuals Source: Approved Data Room";
+  if (dataSource === "saved") return "Actuals Source: Saved company uploads";
+  if (dataSource === "unapproved") return "Actuals Source: Unapproved upload - review pending";
+  if (dataSource === "uploaded") return "Actuals Source: Uploaded Actuals CSV";
+  return "Actuals Source: Demo sample data";
 }
 
 export function getBudgetSourceLabel(dataSource: DataSourceMode) {
-  return dataSource === "uploaded"
-    ? "Budget Source: Uploaded Budget CSV"
-    : "Budget Source: Sample Data";
+  if (dataSource === "approved") return "Budget Source: Approved Data Room";
+  if (dataSource === "saved") return "Budget Source: Saved company uploads";
+  if (dataSource === "unapproved") return "Budget Source: Unapproved upload - review pending";
+  if (dataSource === "uploaded") return "Budget Source: Uploaded Budget CSV";
+  return "Budget Source: Demo sample data";
 }
 
 function getSampleFinancialData(): ActiveFinancialData {
@@ -1136,6 +1191,10 @@ function average(values: number[]) {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
+export function isCompanyDataSource(dataSource: DataSourceMode) {
+  return dataSource !== "sample";
+}
+
 function saveUploadedRows<T>(key: string, rows: T[]) {
   if (!canUseLocalStorage()) {
     return;
@@ -1183,6 +1242,21 @@ function getUploadedRowsPayload<T>(
     clearUploadedRows(key);
     return null;
   }
+}
+
+function normalizeSourceMode(value: unknown): Exclude<DataSourceMode, "sample"> | undefined {
+  return value === "approved" ||
+    value === "saved" ||
+    value === "unapproved" ||
+    value === "uploaded"
+    ? value
+    : undefined;
+}
+
+function normalizeStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : undefined;
 }
 
 function clearUploadedRows(key: string) {

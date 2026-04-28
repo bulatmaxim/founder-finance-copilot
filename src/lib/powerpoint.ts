@@ -30,6 +30,7 @@ import {
   getUploadedPayroll,
   getUploadedPipeline,
   getUploadedRevenueDetail,
+  isCompanyDataSource,
 } from "@/lib/localDataStore";
 import type { FinancialPeriod } from "@/lib/calculations";
 
@@ -538,11 +539,11 @@ function addAppendixSlide(
       `${getActualsSourceLabel(context.activeData.dataSource)}.`,
       `${getBudgetSourceLabel(context.activeBudget.dataSource)}.`,
       `${getCashSourceLabel(context.activeCash.dataSource)}.`,
-      ...(context.activeData.dataSource === "uploaded" ||
-      context.activeBudget.dataSource === "uploaded" ||
-      context.activeCash.dataSource === "uploaded"
-        ? ["Uploaded actuals, budget, and cash CSV data are restored from Supabase when configured."]
-        : []),
+      ...(isCompanyDataSource(context.activeData.dataSource) ||
+      isCompanyDataSource(context.activeBudget.dataSource) ||
+      isCompanyDataSource(context.activeCash.dataSource)
+        ? ["Company actuals, budget, and cash data use approved Data Room uploads first, then saved company uploads, then unapproved uploads if no approved source exists."]
+        : ["This deck uses demo sample data because approved company uploads are not available."]),
       ...context.uploadedDataNotes,
       "Favorable variance logic: higher is favorable for revenue, margin, EBITDA, cash, and runway; lower is favorable for expenses and net burn.",
       "No external accounting, banking, payroll, or CRM service is connected.",

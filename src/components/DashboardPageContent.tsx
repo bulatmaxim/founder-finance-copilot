@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { MetricCard } from "@/components/MetricCard";
+import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
 import { VarianceTable, type VarianceRow } from "@/components/VarianceTable";
 import { sampleBudget } from "@/data/sampleBudget";
 import {
@@ -32,6 +33,7 @@ import {
   getCashMetricsForMonth,
   getCashSourceLabel,
   getUploadedPayroll,
+  isCompanyDataSource,
   type ActiveFinancialData,
   type ActiveBudgetData,
   type ActiveCashData,
@@ -58,11 +60,23 @@ function buildVarianceRow(
 }
 
 export function DashboardPageContent() {
-  const [activeData] = useState<ActiveFinancialData>(() =>
+  const [activeData, setActiveData] = useState<ActiveFinancialData>(() =>
     getActiveFinancialData(),
   );
-  const [activeBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
-  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
+  const [activeBudget, setActiveBudget] = useState<ActiveBudgetData>(() => getActiveBudgetData());
+  const [activeCash, setActiveCash] = useState<ActiveCashData>(() => getActiveCashData());
+
+  useEffect(() => {
+    function refreshData() {
+      setActiveCash(getActiveCashData());
+      setActiveBudget(getActiveBudgetData());
+      setActiveData(getActiveFinancialData());
+    }
+
+    window.addEventListener("founder-finance-data-hydrated", refreshData);
+
+    return () => window.removeEventListener("founder-finance-data-hydrated", refreshData);
+  }, []);
 
   const activeFinancials = activeData.periods;
   const latestActual = activeFinancials[activeFinancials.length - 1];
@@ -132,9 +146,9 @@ export function DashboardPageContent() {
       label: "Net Burn",
       value: formatCurrency(netBurn),
       context:
-        activeCash.dataSource === "uploaded"
+        isCompanyDataSource(activeCash.dataSource)
           ? "Calculated from cash movement"
-          : "Calculated from sample cash data",
+          : "Calculated from demo sample cash data",
     },
     {
       label: "Runway",
@@ -234,16 +248,24 @@ export function DashboardPageContent() {
           <DataSourceBadge label={actualsSourceLabel} />
           <DataSourceBadge label={budgetSourceLabel} />
           <DataSourceBadge label={cashSourceLabel} />
-          {activeData.dataSource === "uploaded" ||
-          activeBudget.dataSource === "uploaded" ||
-          activeCash.dataSource === "uploaded" ? (
+          {isCompanyDataSource(activeData.dataSource) ||
+          isCompanyDataSource(activeBudget.dataSource) ||
+          isCompanyDataSource(activeCash.dataSource) ? (
             <p className="text-sm text-neutral-500">
-              Uploaded actuals, budget, and cash data are restored from Supabase
-              when configured, with a local browser fallback for development.
+              Source: {sourceSummary([
+                activeData.dataSource,
+                activeBudget.dataSource,
+                activeCash.dataSource,
+              ])}.
             </p>
           ) : null}
         </div>
       </div>
+
+      <ReportingSourceNotice
+        reportingMonth={latestActual.month}
+        sources={[activeData.dataSource, activeBudget.dataSource, activeCash.dataSource]}
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => (
@@ -337,4 +359,12 @@ function DataSourceBadge({ label }: { label: string }) {
       {label}
     </span>
   );
+}
+
+function sourceSummary(sources: string[]) {
+  if (sources.includes("approved")) return "Approved Data Room";
+  if (sources.includes("unapproved")) return "Unapproved upload - review pending";
+  if (sources.includes("saved")) return "Saved company uploads";
+  if (sources.includes("uploaded")) return "Uploaded CSV data";
+  return "Demo sample data";
 }

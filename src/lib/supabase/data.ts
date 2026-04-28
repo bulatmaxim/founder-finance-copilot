@@ -131,6 +131,96 @@ export async function getCashBalances() {
   return getRows("cash_rows", "month");
 }
 
+export async function getReportingRowsForMonthlyClose({
+  table,
+  fileCategory,
+  orderBy = "month",
+}: {
+  table: string;
+  fileCategory: string;
+  orderBy?: string;
+}) {
+  const { company } = await getCurrentCompany();
+
+  if (!company) {
+    return {
+      rows: [],
+      sourceMode: "saved" as const,
+      reportingMonths: [],
+      closeStatus: "",
+    };
+  }
+
+  const supabase = createClient();
+  const { data: closeItems, error: closeError } = await supabase
+    .from("monthly_close_items")
+    .select("reporting_month, status, uploaded_file_id")
+    .eq("company_id", company.id)
+    .eq("file_category", fileCategory)
+    .not("uploaded_file_id", "is", null)
+    .order("reporting_month", { ascending: true });
+
+  if (closeError) {
+    console.error(`Failed to load monthly close source rows for ${fileCategory}`, closeError);
+  }
+
+  const approvedItems =
+    closeItems?.filter((item) => item.status === "Approved" && item.uploaded_file_id) ??
+    [];
+  const unapprovedItems =
+    closeItems?.filter(
+      (item) =>
+        item.status !== "Approved" &&
+        item.status !== "Not uploaded" &&
+        item.uploaded_file_id,
+    ) ?? [];
+
+  if (approvedItems.length > 0) {
+    const rows = await getRowsForUploadedFiles({
+      table,
+      companyId: company.id,
+      uploadedFileIds: approvedItems.map((item) => item.uploaded_file_id as string),
+      orderBy,
+    });
+
+    if (rows.length > 0) {
+      return {
+        rows,
+        sourceMode: "approved" as const,
+        reportingMonths: approvedItems.map((item) => String(item.reporting_month)),
+        closeStatus: "Complete",
+      };
+    }
+  }
+
+  if (unapprovedItems.length > 0) {
+    const rows = await getRowsForUploadedFiles({
+      table,
+      companyId: company.id,
+      uploadedFileIds: unapprovedItems.map((item) => item.uploaded_file_id as string),
+      orderBy,
+    });
+
+    if (rows.length > 0) {
+      return {
+        rows,
+        sourceMode: "unapproved" as const,
+        reportingMonths: unapprovedItems.map((item) => String(item.reporting_month)),
+        closeStatus: "Incomplete",
+      };
+    }
+  }
+
+  const rows = await getRows(table, orderBy);
+
+  return {
+    rows,
+    sourceMode: rows.length > 0 ? ("saved" as const) : ("saved" as const),
+    reportingMonths: [],
+    closeStatus: rows.length > 0 ? "Saved company uploads" : "",
+  };
+}
+
 export async function getPayrollRows() {
   return getRows("payroll_rows", "month");
 }
@@ -214,6 +304,37 @@ async function getRows(table: string, orderBy: string, ascending = true) {
 
   if (error) {
     console.error(`Failed to load ${table}`, error);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+async function getRowsForUploadedFiles({
+  table,
+  companyId,
+  uploadedFileIds,
+  orderBy,
+}: {
+  table: string;
+  companyId: string;
+  uploadedFileIds: string[];
+  orderBy: string;
+}) {
+  if (uploadedFileIds.length === 0) {
+    return [];
+  }
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from(table)
+    .select("*")
+    .eq("company_id", companyId)
+    .in("uploaded_file_id", uploadedFileIds)
+    .order(orderBy, { ascending: true });
+
+  if (error) {
+    console.error(`Failed to load ${table} by monthly close upload`, error);
     return [];
   }
 
@@ -577,12 +698,14 @@ export async function saveGeneratedReportToSupabase({
   title,
   fileName,
   file,
+  dataSource,
 }: {
   reportType: string;
   period: string;
   title: string;
   fileName: string;
   file: Blob | null;
+  dataSource?: unknown;
 }) {
   const supabase = ensureSupabase();
   const { user, company } = await getCurrentCompany();
@@ -622,6 +745,7 @@ export async function saveGeneratedReportToSupabase({
       title,
       file_name: fileName,
       storage_path: storagePath,
+      data_source: dataSource ?? null,
     })
     .select("id")
     .single();

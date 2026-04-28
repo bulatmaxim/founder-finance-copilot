@@ -86,6 +86,23 @@ export function buildFinanceSummary(reportingMonth?: string) {
         bankRows.length > 0 ? "Uploaded Bank Transactions CSV" : "Not Uploaded",
       forecast: sourceValue(getForecastSourceLabel(activeForecast.dataSource)),
     },
+    dataSourceStatus: {
+      actualsMode: activeData.dataSource,
+      budgetMode: activeBudget.dataSource,
+      cashMode: activeCash.dataSource,
+      isUsingSample:
+        activeData.dataSource === "sample" ||
+        activeBudget.dataSource === "sample" ||
+        activeCash.dataSource === "sample",
+      isUsingUnapproved:
+        activeData.dataSource === "unapproved" ||
+        activeBudget.dataSource === "unapproved" ||
+        activeCash.dataSource === "unapproved",
+      monthlyCloseComplete:
+        activeData.dataSource === "approved" &&
+        activeBudget.dataSource === "approved" &&
+        activeCash.dataSource === "approved",
+    },
     metrics: {
       revenueActual: actual.revenue,
       revenueBudget: budget.revenue,

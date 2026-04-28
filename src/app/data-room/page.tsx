@@ -20,6 +20,7 @@ import {
   type MonthlyCloseItem,
   type MonthlyCloseStatus,
 } from "@/lib/monthlyClose";
+import { hydrateLocalDataFromSupabase } from "@/lib/supabase/hydrateLocalData";
 
 export default function DataRoomPage() {
   const reportingMonths = useMemo(() => getReportingMonthOptions(), []);
@@ -100,6 +101,7 @@ export default function DataRoomPage() {
       setItems(result.items);
       setActivity(result.activity);
       setCompanyName(result.company.name);
+      await hydrateLocalDataFromSupabase();
       notify(
         "success",
         "File uploaded.",
@@ -127,6 +129,7 @@ export default function DataRoomPage() {
       const result = await updateMonthlyCloseItemStatus({ item, status });
       setItems(result.items);
       setActivity(result.activity);
+      await hydrateLocalDataFromSupabase();
       notify("success", `Marked ${status}.`);
     } catch (error) {
       console.error("Monthly close status update failed", error);
@@ -160,6 +163,7 @@ export default function DataRoomPage() {
       const result = await removeMonthlyCloseFile(item);
       setItems(result.items);
       setActivity(result.activity);
+      await hydrateLocalDataFromSupabase();
       notify("success", "File removed from checklist.");
     } catch (error) {
       console.error("Monthly close file removal failed", error);

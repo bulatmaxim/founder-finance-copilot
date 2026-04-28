@@ -24,6 +24,7 @@ import {
   getUploadedPayroll,
   getUploadedPipeline,
   getUploadedRevenueDetail,
+  isCompanyDataSource,
 } from "@/lib/localDataStore";
 import type { UploadedFinancialRow } from "@/types/financial";
 
@@ -575,9 +576,9 @@ export function generateFounderSummary(options: FinanceInsightOptions = {}) {
     : `cash ended at ${formatCurrency(actual.cashBalance)}`;
 
   const sourcePhrase =
-    activeData.dataSource === "uploaded" ||
-    activeBudget.dataSource === "uploaded" ||
-    activeCash.dataSource === "uploaded"
+    isCompanyDataSource(activeData.dataSource) ||
+    isCompanyDataSource(activeBudget.dataSource) ||
+    isCompanyDataSource(activeCash.dataSource)
       ? `This analysis uses ${getActualsSourceLabel(activeData.dataSource).replace("Actuals Source: ", "").toLowerCase()}, ${getBudgetSourceLabel(activeBudget.dataSource).replace("Budget Source: ", "").toLowerCase()}, and ${getCashSourceLabel(activeCash.dataSource).replace("Cash Source: ", "").toLowerCase()}.`
       : "This analysis uses local sample financial, budget, and cash data.";
 
@@ -593,20 +594,20 @@ export function generateDataQualityInsights(
   const activeCash = getActiveCashData();
 
   if (
-    activeData.dataSource === "uploaded" ||
-    activeBudget.dataSource === "uploaded" ||
-    activeCash.dataSource === "uploaded"
+    isCompanyDataSource(activeData.dataSource) ||
+    isCompanyDataSource(activeBudget.dataSource) ||
+    isCompanyDataSource(activeCash.dataSource)
   ) {
     insights.push({
       id: "uploaded-data-active",
-      title: "Uploaded CSV data is active",
+      title: "Company finance data is active",
       category: "Data Quality",
       severity: "Low",
       summary: `The finance copilot is using ${getActualsSourceLabel(activeData.dataSource).replace("Actuals Source: ", "").toLowerCase()}, ${getBudgetSourceLabel(activeBudget.dataSource).replace("Budget Source: ", "").toLowerCase()}, and ${getCashSourceLabel(activeCash.dataSource).replace("Cash Source: ", "").toLowerCase()}.`,
       whyItMatters:
-        "This proves the local prototype can analyze user-provided actuals without a database or external integrations.",
+        "This confirms CFO insights are using company-uploaded data, with approved Data Room files preferred when available.",
       recommendedAction:
-        "Add persistent database storage and formal account mapping before production use.",
+        "Use the Data Room approval workflow before finalizing board or investor reporting.",
       sourceMetrics: [
         `Uploaded rows: ${activeData.uploadedRows.length}`,
         `Uploaded budget rows: ${activeBudget.uploadedRows.length}`,
@@ -616,16 +617,16 @@ export function generateDataQualityInsights(
   } else if (!options.uploadedRows || options.uploadedRows.length === 0) {
     insights.push({
       id: "uploaded-data-not-linked",
-      title: "Uploaded data is not yet connected",
+      title: "Demo sample data is active",
       category: "Data Quality",
       severity: "Low",
       summary:
-        "The finance copilot is using local sample data because no uploaded CSV data is active.",
+        "The finance copilot is using demo sample data because no approved or saved company data is active.",
       whyItMatters:
         "The rule engine can prove the analyst workflow now, but production use will need a governed source of truth.",
       recommendedAction:
-        "Keep uploaded data session-only until mapping, review, and persistence are added.",
-      sourceMetrics: ["Source: local sample financials, budget, and forecast"],
+        "Upload and approve monthly close files in the Data Room before using this for operating decisions.",
+      sourceMetrics: ["Source: demo sample financials, budget, and forecast"],
     });
   } else {
     const errorRows = options.uploadedRows.filter((row) => row.status === "Error");
