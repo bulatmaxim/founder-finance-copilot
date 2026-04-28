@@ -41,20 +41,25 @@ export function AccountMappingNotice() {
   }
 
   return (
-    <div className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
-      {summary.unmappedAccounts > 0 ? (
-        <>
-          {summary.unmappedAccounts} account
-          {summary.unmappedAccounts === 1 ? " is" : "s are"} unmapped.
-        </>
-      ) : null}{" "}
-      {summary.needsReview > 0 ? (
-        <>
-          {summary.needsReview} mapping
-          {summary.needsReview === 1 ? " needs" : "s need"} review.
-        </>
-      ) : null}{" "}
-      Reporting may be less accurate until mapping is completed.
+    <div className="premium-notice rounded-2xl px-4 py-3 text-sm">
+      <div className="flex items-start gap-3">
+        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-sky-300 shadow-[0_0_16px_rgba(125,211,252,0.7)]" />
+        <span>
+          {summary.unmappedAccounts > 0 ? (
+            <>
+              {summary.unmappedAccounts} account
+              {summary.unmappedAccounts === 1 ? " is" : "s are"} unmapped.
+            </>
+          ) : null}{" "}
+          {summary.needsReview > 0 ? (
+            <>
+              {summary.needsReview} mapping
+              {summary.needsReview === 1 ? " needs" : "s need"} review.
+            </>
+          ) : null}{" "}
+          Reporting may be less accurate until mapping is completed.
+        </span>
+      </div>
     </div>
   );
 }

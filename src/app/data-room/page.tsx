@@ -181,16 +181,16 @@ export default function DataRoomPage() {
     <section className="space-y-8">
       <Toast message={toast} onClose={() => setToast(null)} />
 
-      <div className="rounded-md border border-neutral-200 bg-white p-6">
+      <div className="premium-card overflow-hidden rounded-3xl p-6">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-sm font-medium uppercase tracking-[0.12em] text-neutral-500">
+            <p className="text-sm font-medium uppercase tracking-[0.18em] text-sky-200/70">
               Data Room
             </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+            <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-50">
               Monthly Close Data Room
             </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
               Upload, validate, and approve monthly financial data before
               reports and CFO insights are generated.
             </p>
@@ -198,7 +198,7 @@ export default function DataRoomPage() {
 
           <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[620px]">
             <label className="block">
-              <span className="text-sm font-medium text-neutral-700">
+              <span className="text-sm font-medium text-slate-300">
                 Reporting month
               </span>
               <select
@@ -215,16 +215,16 @@ export default function DataRoomPage() {
             </label>
 
             <div>
-              <p className="text-sm font-medium text-neutral-700">Company</p>
-              <div className="mt-2 flex h-10 items-center rounded-md border border-neutral-200 bg-neutral-50 px-3 text-sm font-medium text-neutral-950">
+              <p className="text-sm font-medium text-slate-300">Company</p>
+              <div className="premium-pill mt-2 flex h-10 items-center rounded-xl px-3 text-sm font-medium">
                 {companyName || "Company profile required"}
               </div>
             </div>
 
             <div>
-              <p className="text-sm font-medium text-neutral-700">Close status</p>
-              <div className="mt-2 flex h-10 items-center rounded-md border border-neutral-200 bg-neutral-50 px-3">
-                <span className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs font-medium text-neutral-950">
+              <p className="text-sm font-medium text-slate-300">Close status</p>
+              <div className="premium-pill mt-2 flex h-10 items-center rounded-xl px-3">
+                <span className="rounded-xl border border-sky-300/20 bg-sky-300/10 px-2 py-1 text-xs font-medium text-sky-100">
                   {isLoading ? "Loading" : overallStatus}
                 </span>
               </div>
@@ -232,14 +232,14 @@ export default function DataRoomPage() {
           </div>
         </div>
 
-        <div className="mt-5 border-t border-neutral-100 pt-4 text-sm text-neutral-500">
+        <div className="mt-5 border-t border-white/10 pt-4 text-sm text-slate-500">
           Selected period: {reportingMonthKey(selectedMonth)}
         </div>
       </div>
 
       {isLoading ? (
-        <section className="rounded-md border border-neutral-200 bg-white p-6">
-          <p className="text-sm text-neutral-500">Loading monthly close checklist...</p>
+        <section className="premium-card rounded-2xl p-6">
+          <div className="premium-skeleton h-16 rounded-2xl border border-white/10" />
         </section>
       ) : (
         <>
@@ -268,34 +268,34 @@ export default function DataRoomPage() {
 
 function RecentActivity({ activity }: { activity: MonthlyCloseActivity[] }) {
   return (
-    <section className="rounded-md border border-neutral-200 bg-white">
-      <div className="border-b border-neutral-200 px-5 py-4">
-        <h2 className="text-base font-semibold">Recent Activity</h2>
-        <p className="mt-1 text-sm text-neutral-500">
+    <section className="premium-card overflow-hidden rounded-2xl">
+      <div className="premium-panel-header px-5 py-4">
+        <h2 className="text-base font-semibold text-slate-50">Recent Activity</h2>
+        <p className="mt-1 text-sm text-slate-400">
           Data Room actions for the selected reporting month.
         </p>
       </div>
       <div className="p-5">
         {activity.length === 0 ? (
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-slate-400">
             No Data Room activity has been recorded for this month yet.
           </p>
         ) : (
-          <div className="divide-y divide-neutral-100">
+          <div className="divide-y divide-white/10">
             {activity.map((item) => (
               <div
                 key={item.id}
                 className="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>
-                  <p className="font-medium text-neutral-950">
+                  <p className="font-medium text-slate-100">
                     {formatAction(item.action)}
                   </p>
-                  <p className="mt-1 text-neutral-500">
+                  <p className="mt-1 text-slate-500">
                     {String(item.details?.file_name ?? item.file_category)}
                   </p>
                 </div>
-                <p className="text-neutral-500">{formatActivityDate(item.created_at)}</p>
+                <p className="text-slate-500">{formatActivityDate(item.created_at)}</p>
               </div>
             ))}
           </div>

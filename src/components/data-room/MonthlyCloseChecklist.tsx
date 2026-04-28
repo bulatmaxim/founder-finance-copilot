@@ -33,24 +33,24 @@ export function MonthlyCloseChecklist({
   );
 
   return (
-    <section className="rounded-md border border-neutral-200 bg-white">
-      <div className="border-b border-neutral-200 px-5 py-4">
-        <h2 className="text-base font-semibold">Monthly Close Checklist</h2>
-        <p className="mt-1 text-sm text-neutral-500">
+    <section className="premium-card overflow-hidden rounded-2xl">
+      <div className="premium-panel-header px-5 py-4">
+        <h2 className="text-base font-semibold text-slate-50">Monthly Close Checklist</h2>
+        <p className="mt-1 text-sm text-slate-400">
           Required finance files for {formatReportingMonth(reportingMonth)}.
         </p>
       </div>
 
       {items.length === 0 ? (
         <div className="p-5">
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-slate-400">
             No files have been uploaded for this reporting month yet.
           </p>
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1120px] text-left text-sm">
-            <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-600">
+            <thead className="border-b border-white/10 text-slate-400">
               <tr>
                 <th className="px-4 py-3 font-medium">File category</th>
                 <th className="px-4 py-3 font-medium">Description</th>
@@ -76,27 +76,27 @@ export function MonthlyCloseChecklist({
                 const hasUploadedFile = Boolean(item.uploaded_file_id);
 
                 return (
-                  <tr key={category.id} className="border-b border-neutral-100 align-top">
+                  <tr key={category.id} className="border-b border-white/10 align-top">
                     <td className="px-4 py-4">
-                      <p className="font-medium text-neutral-950">{category.title}</p>
+                      <p className="font-medium text-slate-100">{category.title}</p>
                     </td>
-                    <td className="max-w-xs px-4 py-4 text-neutral-600">
+                    <td className="max-w-xs px-4 py-4 text-slate-400">
                       {category.description}
                     </td>
                     <td className="px-4 py-4">
                       <StatusBadge status={item.status} />
                       {item.approved_at ? (
-                        <p className="mt-2 text-xs text-neutral-500">
+                        <p className="mt-2 text-xs text-slate-500">
                           Approved {formatDateTime(item.approved_at)}
                         </p>
                       ) : null}
                     </td>
-                    <td className="max-w-[220px] px-4 py-4 text-neutral-700">
+                    <td className="max-w-[220px] px-4 py-4 text-slate-300">
                       <span className="break-words">
                         {item.file_name || "No file uploaded"}
                       </span>
                     </td>
-                    <td className="px-4 py-4 text-neutral-600">
+                    <td className="px-4 py-4 text-slate-400">
                       {formatDateTime(item.uploaded_at)}
                     </td>
                     <td className="px-4 py-4">
@@ -104,7 +104,7 @@ export function MonthlyCloseChecklist({
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex flex-wrap gap-2">
-                        <label className="inline-flex h-9 cursor-pointer items-center rounded-md border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-950 hover:bg-neutral-50">
+                        <label className="inline-flex h-9 cursor-pointer items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10">
                           {isUploading
                             ? "Uploading..."
                             : hasUploadedFile
@@ -130,7 +130,7 @@ export function MonthlyCloseChecklist({
                           type="button"
                           disabled={!canReview || isSaving}
                           onClick={() => onStatusChange(item, "Needs review")}
-                          className="h-9 rounded-md border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-950 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-400"
+                          className="h-9 rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10 disabled:cursor-not-allowed disabled:text-slate-600"
                         >
                           Needs Review
                         </button>
@@ -138,7 +138,7 @@ export function MonthlyCloseChecklist({
                           type="button"
                           disabled={!canApprove || isSaving}
                           onClick={() => onStatusChange(item, "Approved")}
-                          className="h-9 rounded-md bg-neutral-950 px-3 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+                          className="h-9 rounded-xl bg-neutral-950 px-3 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
                         >
                           {isSaving ? "Saving..." : "Approve"}
                         </button>
@@ -147,7 +147,7 @@ export function MonthlyCloseChecklist({
                             type="button"
                             disabled={isSaving || isUploading}
                             onClick={() => onRemove(item)}
-                            className="h-9 rounded-md border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-950 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-400"
+                            className="h-9 rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10 disabled:cursor-not-allowed disabled:text-slate-600"
                           >
                             Remove file
                           </button>
@@ -168,14 +168,14 @@ export function MonthlyCloseChecklist({
 function StatusBadge({ status }: { status: MonthlyCloseStatus }) {
   const className =
     status === "Approved"
-      ? "border-neutral-950 bg-neutral-950 text-white"
+      ? "premium-success"
       : status === "Needs review"
-        ? "border-neutral-300 bg-neutral-100 text-neutral-950"
-        : "border-neutral-200 bg-white text-neutral-700";
+        ? "premium-warning"
+        : "premium-pill";
 
   return (
     <span
-      className={`inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium ${className}`}
+      className={`inline-flex h-7 items-center rounded-xl border px-2 text-xs font-medium ${className}`}
     >
       {status}
     </span>
@@ -199,7 +199,7 @@ function ValidationBadge({ item }: { item: MonthlyCloseItem }) {
           : "No issues";
 
   return (
-    <span className="inline-flex h-7 items-center rounded-md border border-neutral-200 bg-white px-2 text-xs font-medium text-neutral-700">
+    <span className="premium-pill inline-flex h-7 items-center rounded-xl px-2 text-xs font-medium">
       {label}
     </span>
   );

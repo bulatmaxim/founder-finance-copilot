@@ -180,30 +180,30 @@ export function FinanceCopilotPanel({
   return (
     <section className="space-y-6">
       <Toast message={toast} onClose={() => setToast(null)} />
-      <div>
-        <p className="text-sm font-medium uppercase tracking-[0.12em] text-neutral-500">
+      <div className="premium-card rounded-2xl p-5">
+        <p className="text-sm font-medium uppercase tracking-[0.18em] text-sky-200/70">
           Finance Copilot
         </p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-50">
           Local CFO Analyst
         </h2>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
           {aiBrief
             ? "AI-generated CFO commentary using calculated local finance summary data."
             : `Rule-based finance analysis for ${insightResult.companyName}, using local browser data only.`}
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+          <span className="premium-pill rounded-xl px-2 py-1 text-xs font-medium">
             {insightResult.actualsSource}
           </span>
-          <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+          <span className="premium-pill rounded-xl px-2 py-1 text-xs font-medium">
             {insightResult.budgetSource}
           </span>
-          <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+          <span className="premium-pill rounded-xl px-2 py-1 text-xs font-medium">
             {insightResult.cashSource}
           </span>
           {insightResult.dataWarnings.map((warning) => (
-            <span key={warning} className="text-sm text-neutral-500">
+            <span key={warning} className="text-sm text-slate-500">
               {warning}
             </span>
           ))}
@@ -213,7 +213,7 @@ export function FinanceCopilotPanel({
             type="button"
             onClick={handleGenerateAIBrief}
             disabled={isGeneratingAiBrief}
-            className="h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+            className="h-10 rounded-xl bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           >
             {isGeneratingAiBrief ? "Generating CFO Brief..." : "Generate AI CFO Brief"}
           </button>
@@ -221,17 +221,17 @@ export function FinanceCopilotPanel({
             <button
               type="button"
               onClick={handleClearAIBrief}
-              className="h-10 rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-50"
+              className="h-10 rounded-xl border border-white/10 bg-white/[0.045] px-4 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10"
             >
               Clear AI Brief
             </button>
           ) : null}
         </div>
         {aiFallbackNote && !aiBrief ? (
-          <p className="mt-3 text-sm text-neutral-500">{aiFallbackNote}</p>
+          <p className="mt-3 text-sm text-slate-500">{aiFallbackNote}</p>
         ) : null}
         {aiBrief ? (
-          <p className="mt-3 text-sm text-neutral-500">
+          <p className="mt-3 text-sm text-slate-500">
             Latest AI brief saved locally
             {aiBrief.reportingPeriod ? ` for ${aiBrief.reportingPeriod}` : ""}.
             {hasSupabaseBrowserEnv() ? " Supabase persistence is enabled." : ""}
@@ -240,18 +240,18 @@ export function FinanceCopilotPanel({
       </div>
 
       {briefHistory.length > 0 ? (
-        <section className="rounded-md border border-neutral-200 bg-white p-5">
-          <h3 className="text-base font-semibold">Prior CFO Briefs</h3>
-          <div className="mt-4 divide-y divide-neutral-100">
+        <section className="premium-card rounded-2xl p-5">
+          <h3 className="text-base font-semibold text-slate-50">Prior CFO Briefs</h3>
+          <div className="mt-4 divide-y divide-white/10">
             {briefHistory.map((item) => (
               <div
                 key={item.id}
                 className="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
               >
-                <span className="font-medium text-neutral-950">
+                <span className="font-medium text-slate-100">
                   {item.period || "Unlabeled period"}
                 </span>
-                <span className="text-neutral-500">
+                <span className="text-slate-500">
                   {formatHistoryDate(item.created_at)}
                 </span>
               </div>
@@ -260,15 +260,15 @@ export function FinanceCopilotPanel({
         </section>
       ) : null}
 
-      <section className="rounded-md border border-neutral-200 bg-white p-5">
-        <h3 className="text-base font-semibold">
+      <section className="premium-card rounded-2xl p-5">
+        <h3 className="text-base font-semibold text-slate-50">
           {aiBrief ? "AI CFO Summary" : "Founder Summary"}
         </h3>
-        <p className="mt-3 text-sm leading-6 text-neutral-700">
+        <p className="mt-3 text-sm leading-6 text-slate-400">
           {founderSummary}
         </p>
         {aiBrief?.boardSlideSummary ? (
-          <p className="mt-3 text-sm leading-6 text-neutral-500">
+          <p className="mt-3 text-sm leading-6 text-slate-500">
             Board slide summary: {aiBrief.boardSlideSummary}
           </p>
         ) : null}
@@ -277,8 +277,8 @@ export function FinanceCopilotPanel({
       {showPriorityAlerts ? (
         <section className="space-y-4">
           <div>
-            <h3 className="text-base font-semibold">Priority Alerts</h3>
-            <p className="mt-1 text-sm text-neutral-500">
+            <h3 className="text-base font-semibold text-slate-50">Priority Alerts</h3>
+            <p className="mt-1 text-sm text-slate-400">
               Highest-priority insights sorted by severity.
             </p>
           </div>
@@ -310,17 +310,17 @@ export function FinanceCopilotPanel({
       ) : null}
 
       {showForecastRecommendation ? (
-        <section className="rounded-md border border-neutral-200 bg-white p-5">
+        <section className="premium-card rounded-2xl p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
-              <h3 className="text-base font-semibold">
+              <h3 className="text-base font-semibold text-slate-50">
                 Forecast Update Recommendation
               </h3>
-              <p className="mt-2 text-sm leading-6 text-neutral-700">
+              <p className="mt-2 text-sm leading-6 text-slate-400">
                 {forecastSummary}
               </p>
             </div>
-            <span className="rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
+            <span className="premium-pill rounded-xl px-2 py-1 text-xs font-medium">
               {aiBrief
                 ? "AI generated"
                 : insightResult.forecastRecommendation.shouldUpdate
@@ -330,10 +330,10 @@ export function FinanceCopilotPanel({
           </div>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <div>
-              <p className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+              <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
                 Reasons
               </p>
-              <ul className="mt-3 space-y-2 text-sm leading-6 text-neutral-700">
+              <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-400">
                 {(aiBrief
                   ? [aiBrief.forecastRecommendation]
                   : insightResult.forecastRecommendation.reasons
@@ -345,7 +345,7 @@ export function FinanceCopilotPanel({
               </ul>
             </div>
             <div>
-              <p className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+              <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
                 Drivers
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -355,7 +355,7 @@ export function FinanceCopilotPanel({
                 ).map((driver) => (
                   <span
                     key={driver}
-                    className="rounded-md border border-neutral-200 px-2 py-1 text-xs text-neutral-700"
+                    className="premium-pill rounded-xl px-2 py-1 text-xs"
                   >
                     {driver}
                   </span>
@@ -367,8 +367,8 @@ export function FinanceCopilotPanel({
       ) : null}
 
       {showAsk ? (
-        <section className="rounded-md border border-neutral-200 bg-white p-5">
-          <h3 className="text-base font-semibold">Ask Finance Copilot</h3>
+        <section className="premium-card rounded-2xl p-5">
+          <h3 className="text-base font-semibold text-slate-50">Ask Finance Copilot</h3>
           <div className="mt-4 flex flex-wrap gap-2">
             {presetQuestions.map((question) => (
               <button
@@ -377,19 +377,19 @@ export function FinanceCopilotPanel({
                 onClick={() => setSelectedQuestion(question)}
                 className={`rounded-md border px-3 py-2 text-sm font-medium ${
                   selectedQuestion === question
-                    ? "border-neutral-950 bg-neutral-950 text-white"
-                    : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
+                    ? "border-sky-300/30 bg-neutral-950 text-white"
+                    : "border-white/10 bg-white/[0.045] text-slate-300 hover:bg-sky-300/10"
                 }`}
               >
                 {question}
               </button>
             ))}
           </div>
-          <div className="mt-5 rounded-md border border-neutral-200 bg-neutral-50 p-4">
-            <p className="text-sm font-medium text-neutral-950">
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+            <p className="text-sm font-medium text-slate-50">
               {selectedQuestion}
             </p>
-            <p className="mt-2 text-sm leading-6 text-neutral-700">{answer}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">{answer}</p>
           </div>
         </section>
       ) : null}
@@ -455,9 +455,9 @@ function ListSection({
   const ListTag = ordered ? "ol" : "ul";
 
   return (
-    <section className="rounded-md border border-neutral-200 bg-white p-5">
-      <h3 className="text-base font-semibold">{title}</h3>
-      <ListTag className="mt-4 space-y-3 text-sm leading-6 text-neutral-700">
+    <section className="premium-card rounded-2xl p-5">
+      <h3 className="text-base font-semibold text-slate-50">{title}</h3>
+      <ListTag className="mt-4 space-y-3 text-sm leading-6 text-slate-400">
         {items.map((item) => (
           <li
             key={item}

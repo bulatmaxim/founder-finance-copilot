@@ -45,15 +45,20 @@ export function ForecastVersionNotice({
 
   if (compact) {
     return (
-      <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+      <span className="premium-pill rounded-xl px-2.5 py-1 text-xs font-medium">
         Forecast: {context.name}
       </span>
     );
   }
 
   return (
-    <div className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
-      Forecast context: {context.name} ({context.status}).{actualsText}
+    <div className="premium-notice rounded-2xl px-4 py-3 text-sm">
+      <div className="flex items-start gap-3">
+        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-sky-300 shadow-[0_0_16px_rgba(125,211,252,0.7)]" />
+        <span>
+          Forecast context: {context.name} ({context.status}).{actualsText}
+        </span>
+      </div>
     </div>
   );
 }

@@ -235,33 +235,48 @@ export function DashboardPageContent() {
 
   return (
     <section className="space-y-8">
-      <div>
-        <p className="text-sm font-medium uppercase tracking-[0.12em] text-neutral-500">
-          Dashboard
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-          CFO Dashboard
-        </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-neutral-600">
-          Twelve-month local sample view of financial performance, liquidity,
-          runway, and budget discipline.
-        </p>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <DataSourceBadge label={actualsSourceLabel} />
-          <DataSourceBadge label={budgetSourceLabel} />
-          <DataSourceBadge label={cashSourceLabel} />
-          {isCompanyDataSource(activeData.dataSource) ||
-          isCompanyDataSource(activeBudget.dataSource) ||
-          isCompanyDataSource(activeCash.dataSource) ? (
-            <p className="text-sm text-neutral-500">
-              Source: {sourceSummary([
-                activeData.dataSource,
-                activeBudget.dataSource,
-                activeCash.dataSource,
-              ])}.
-            </p>
-          ) : null}
-          <ForecastVersionNotice compact />
+      <div className="premium-card overflow-hidden rounded-3xl">
+        <div className="relative p-6 sm:p-8">
+          <div className="pointer-events-none absolute right-0 top-0 h-44 w-44 rounded-full bg-sky-300/10 blur-3xl" />
+          <div className="relative grid gap-8 xl:grid-cols-[1.4fr_0.8fr] xl:items-end">
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.18em] text-sky-200/70">
+                Dashboard
+              </p>
+              <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-50 sm:text-5xl">
+                CFO Dashboard
+              </h1>
+              <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-400">
+                Executive view of performance, liquidity, runway, budget discipline,
+                and the trusted data feeding each operating decision.
+              </p>
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <DataSourceBadge label={actualsSourceLabel} />
+                <DataSourceBadge label={budgetSourceLabel} />
+                <DataSourceBadge label={cashSourceLabel} />
+                <ForecastVersionNotice compact />
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Operating source
+              </p>
+              <p className="mt-3 text-lg font-semibold text-slate-50">
+                {sourceSummary([
+                  activeData.dataSource,
+                  activeBudget.dataSource,
+                  activeCash.dataSource,
+                ])}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {isCompanyDataSource(activeData.dataSource) ||
+                isCompanyDataSource(activeBudget.dataSource) ||
+                isCompanyDataSource(activeCash.dataSource)
+                  ? "Company data is active for at least one reporting stream."
+                  : "Demo sample data is clearly labeled until approved company data is available."}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -287,9 +302,9 @@ export function DashboardPageContent() {
       />
 
       {[...activeData.warnings, ...activeBudget.warnings].length > 0 ? (
-        <section className="rounded-md border border-neutral-200 bg-white p-5">
-          <h2 className="text-base font-semibold">Data Assumptions</h2>
-          <ul className="mt-3 space-y-2 text-sm leading-6 text-neutral-700">
+        <section className="premium-card rounded-2xl p-5">
+          <h2 className="text-base font-semibold text-slate-50">Data Assumptions</h2>
+          <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-400">
             {[...activeData.warnings, ...activeBudget.warnings].map((warning) => (
               <li key={warning} className="ml-4 list-disc">
                 {warning}
@@ -330,8 +345,8 @@ export function DashboardPageContent() {
           description="Revenue performance against plan."
           data={actualVsBudgetData}
           series={[
-            { dataKey: "actualRevenue", label: "Actual", fill: "#111111" },
-            { dataKey: "budgetRevenue", label: "Budget", fill: "#a3a3a3" },
+            { dataKey: "actualRevenue", label: "Actual", fill: "#7dd3fc" },
+            { dataKey: "budgetRevenue", label: "Budget", fill: "#64748b" },
           ]}
           variant="bar"
         />
@@ -343,12 +358,12 @@ export function DashboardPageContent() {
             {
               dataKey: "actualOperatingExpenses",
               label: "Actual",
-              fill: "#111111",
+              fill: "#7dd3fc",
             },
             {
               dataKey: "budgetOperatingExpenses",
               label: "Budget",
-              fill: "#a3a3a3",
+              fill: "#64748b",
             },
           ]}
           variant="bar"
@@ -362,7 +377,7 @@ export function DashboardPageContent() {
 
 function DataSourceBadge({ label }: { label: string }) {
   return (
-    <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+    <span className="premium-pill rounded-xl px-2.5 py-1 text-xs font-medium">
       {label}
     </span>
   );

@@ -23,9 +23,11 @@ export function MonthlyCloseSummaryCards({ items }: { items: MonthlyCloseItem[] 
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <article className="rounded-md border border-neutral-200 bg-white p-5">
-      <p className="text-sm font-medium text-neutral-500">{label}</p>
-      <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
+    <article className="premium-card premium-card-hover rounded-2xl p-5">
+      <p className="text-sm font-medium text-slate-400">{label}</p>
+      <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-50">
+        {value}
+      </p>
     </article>
   );
 }

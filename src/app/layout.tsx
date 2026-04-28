@@ -17,12 +17,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <div className="min-h-screen bg-white text-neutral-950">
+        <div className="premium-shell">
           <SupabaseDataHydrator />
           <Sidebar />
-          <div className="min-h-screen lg:pl-72">
+          <div className="premium-main min-h-screen lg:pl-72">
             <TopBar />
-            <main className="px-5 py-6 sm:px-8 lg:px-10">{children}</main>
+            <main className="mx-auto max-w-[1680px] px-5 py-7 sm:px-8 lg:px-10 xl:px-12">
+              {children}
+            </main>
           </div>
         </div>
       </body>
