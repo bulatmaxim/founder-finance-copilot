@@ -10,7 +10,6 @@ import {
   sampleForecast,
   type ForecastMonth,
   type ForecastVersion,
-  type ForecastVersionId,
 } from "@/data/sampleForecast";
 import {
   calculateVarianceDollars,
@@ -24,6 +23,13 @@ import {
   formatRunwayMonths,
   formatVarianceLabel,
 } from "@/lib/formatting";
+import {
+  forecastVersionToDisplayVersion,
+  getSelectedForecastVersionId,
+  loadForecastVersionsForDisplay,
+  setSelectedForecastVersionId,
+  type ForecastVersionWithRows,
+} from "@/lib/forecastVersions";
 import {
   getActiveBudgetData,
   getActiveCashData,
@@ -103,9 +109,13 @@ const forecastRows: {
 ];
 
 export default function ForecastsPage() {
-  const [selectedVersionId, setSelectedVersionId] =
-    useState<ForecastVersionId>("latest");
+  const [selectedVersionId, setSelectedVersionId] = useState<string>("latest");
   const [notice, setNotice] = useState("");
+  const [availableForecastVersions, setAvailableForecastVersions] =
+    useState<ForecastVersion[]>(sampleForecast);
+  const [managedForecastVersions, setManagedForecastVersions] = useState<
+    ForecastVersionWithRows[]
+  >([]);
   const [activeData, setActiveData] = useState<ActiveFinancialData>(() =>
     getActiveFinancialData(),
   );
@@ -128,16 +138,54 @@ export default function ForecastsPage() {
     return () => window.removeEventListener("founder-finance-data-hydrated", refreshData);
   }, []);
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      async function loadManagedForecasts() {
+        try {
+          const managedVersions = await loadForecastVersionsForDisplay();
+
+          if (managedVersions.length === 0) {
+            return;
+          }
+
+          const displayVersions = managedVersions.map(forecastVersionToDisplayVersion);
+          const selectedId = getSelectedForecastVersionId();
+
+          setManagedForecastVersions(managedVersions);
+          setAvailableForecastVersions(displayVersions);
+          setSelectedVersionId(
+            selectedId && displayVersions.some((version) => version.id === selectedId)
+              ? selectedId
+              : displayVersions[0].id,
+          );
+        } catch (error) {
+          console.error("Managed forecast versions could not be loaded", error);
+        }
+      }
+
+      void loadManagedForecasts();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
+
   const selectedVersion = useMemo(
     () =>
-      sampleForecast.find((version) => version.id === selectedVersionId) ??
-      sampleForecast[0],
-    [selectedVersionId],
+      availableForecastVersions.find((version) => version.id === selectedVersionId) ??
+      availableForecastVersions[0],
+    [availableForecastVersions, selectedVersionId],
   );
-  const budget = getVersion("budget");
-  const latest = getVersion("latest");
-  const downside = getVersion("downside");
-  const upside = getVersion("upside");
+  const selectedManagedVersion = managedForecastVersions.find(
+    (version) => version.id === selectedVersion.id,
+  );
+  const budget = getBudgetVersion(availableForecastVersions);
+  const latest = selectedVersion;
+  const comparisonVersions = uniqueVersions([
+    budget,
+    latest,
+    getNamedVersion(availableForecastVersions, "downside"),
+    getNamedVersion(availableForecastVersions, "upside"),
+  ]);
   const selectedSummary = summarizeForecast(selectedVersion);
   const budgetSummary = summarizeForecast(budget);
   const latestSummary = summarizeForecast(latest);
@@ -156,7 +204,7 @@ export default function ForecastsPage() {
     };
   });
 
-  const versionChartData = sampleForecast.map((version) => {
+  const versionChartData = availableForecastVersions.map((version) => {
     const summary = summarizeForecast(version);
 
     return {
@@ -166,7 +214,7 @@ export default function ForecastsPage() {
     };
   });
 
-  const scenarioRows = [budget, latest, downside, upside].map((version) => {
+  const scenarioRows = comparisonVersions.map((version) => {
     const summary = summarizeForecast(version);
 
     return {
@@ -187,14 +235,15 @@ export default function ForecastsPage() {
             Rolling Forecasts
           </h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
-            Compare Acme AI budget, latest forecast, rolling forecast versions,
-            and planning cases using local sample data.
+            Compare budget, selected forecast versions, rolling forecasts, and
+            planning cases using saved forecast versions when available.
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
             <DataSourceBadge label={getBudgetSourceLabel(activeBudget.dataSource)} />
             <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
             <DataSourceBadge label={getForecastSourceLabel(activeForecast.dataSource)} />
+            <DataSourceBadge label={`Forecast Version: ${selectedVersion.name}`} />
             {isCompanyDataSource(activeData.dataSource) ||
             isCompanyDataSource(activeBudget.dataSource) ||
             isCompanyDataSource(activeCash.dataSource) ||
@@ -212,12 +261,19 @@ export default function ForecastsPage() {
             Forecast version
             <select
               value={selectedVersionId}
-              onChange={(event) =>
-                setSelectedVersionId(event.target.value as ForecastVersionId)
-              }
+              onChange={(event) => {
+                setSelectedVersionId(event.target.value);
+                setSelectedForecastVersionId(event.target.value);
+              }}
               className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-950"
             >
-              {forecastVersionOptions.map((version) => (
+              {(availableForecastVersions.length > 0
+                ? availableForecastVersions.map((version) => ({
+                    id: version.id,
+                    name: version.name,
+                  }))
+                : forecastVersionOptions
+              ).map((version) => (
                 <option key={version.id} value={version.id}>
                   {version.name}
                 </option>
@@ -229,7 +285,7 @@ export default function ForecastsPage() {
             type="button"
             onClick={() =>
               setNotice(
-                "Future versions will actualize closed months and update future forecast months. This prototype does not save new forecast versions yet.",
+                "Use Forecast Versions to create saved rolling forecasts. This page displays the selected saved version when available.",
               )
             }
             className="h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800"
@@ -251,6 +307,15 @@ export default function ForecastsPage() {
       />
 
       <AccountMappingNotice />
+
+      {selectedManagedVersion?.actuals_through_month &&
+      selectedManagedVersion.actualMonths === 0 ? (
+        <section className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
+          {selectedManagedVersion.name} requests actuals through{" "}
+          {selectedManagedVersion.actuals_through_month}, but no approved Data
+          Room actuals were found for those months.
+        </section>
+      ) : null}
 
       {isCompanyDataSource(activeData.dataSource) ? (
         <section className="rounded-md border border-neutral-200 bg-white p-5">
@@ -706,16 +771,6 @@ function DataSourceBadge({ label }: { label: string }) {
   );
 }
 
-function getVersion(id: ForecastVersionId) {
-  const version = sampleForecast.find((item) => item.id === id);
-
-  if (!version) {
-    throw new Error(`Missing forecast version: ${id}`);
-  }
-
-  return version;
-}
-
 function getScenarioRecommendation(runwayMonths: number) {
   if (runwayMonths >= 15) {
     return "Maintain plan";
@@ -730,6 +785,36 @@ function getScenarioRecommendation(runwayMonths: number) {
   }
 
   return "Prioritize cash preservation";
+}
+
+function getBudgetVersion(versions: ForecastVersion[]) {
+  return (
+    versions.find((version) => version.id === "budget") ??
+    versions.find((version) => version.name.toLowerCase().includes("budget")) ??
+    versions[0]
+  );
+}
+
+function getNamedVersion(versions: ForecastVersion[], name: string) {
+  return versions.find((version) =>
+    version.name.toLowerCase().includes(name.toLowerCase()),
+  );
+}
+
+function uniqueVersions(versions: (ForecastVersion | undefined)[]) {
+  const seen = new Set<string>();
+  const result: ForecastVersion[] = [];
+
+  versions.forEach((version) => {
+    if (!version || seen.has(version.id)) {
+      return;
+    }
+
+    seen.add(version.id);
+    result.push(version);
+  });
+
+  return result;
 }
 
 function formatMetricValue(value: number, format: MetricFormat) {

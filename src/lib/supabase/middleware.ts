@@ -8,6 +8,7 @@ const protectedRoutes = [
   "/company-profile",
   "/data-room",
   "/decision-center",
+  "/forecast-versions",
   "/forecasts",
   "/mapping",
   "/onboarding",

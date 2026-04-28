@@ -17,7 +17,7 @@ export type ForecastMonth = ActualFinancialMonth & {
 };
 
 export type ForecastVersion = {
-  id: ForecastVersionId;
+  id: string;
   name: string;
   actualMonths: number;
   description: string;

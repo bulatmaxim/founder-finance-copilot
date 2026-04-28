@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AccountMappingNotice } from "@/components/AccountMappingNotice";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
+import { ForecastVersionNotice } from "@/components/ForecastVersionNotice";
 import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
 import { sampleCompany } from "@/data/sampleCompany";
 import {
@@ -42,6 +43,10 @@ import {
 import { generateMonthlyCfoDeck } from "@/lib/powerpoint";
 import { hasSupabaseBrowserEnv } from "@/lib/supabase/client";
 import { saveGeneratedReportToSupabase } from "@/lib/supabase/data";
+import {
+  loadForecastVersionContext,
+  type ForecastVersionContext,
+} from "@/lib/forecastVersions";
 
 type Highlight = {
   label: string;
@@ -81,6 +86,8 @@ export function CFOBrief() {
   const [generatedMonth, setGeneratedMonth] = useState(selectedMonth);
   const [deckMessage, setDeckMessage] = useState("");
   const [isGeneratingDeck, setIsGeneratingDeck] = useState(false);
+  const [forecastContext, setForecastContext] =
+    useState<ForecastVersionContext | null>(null);
 
   const brief = useMemo(
     () => buildBriefForMonth(generatedMonth),
@@ -105,6 +112,22 @@ export function CFOBrief() {
     window.addEventListener("founder-finance-data-hydrated", refreshData);
 
     return () => window.removeEventListener("founder-finance-data-hydrated", refreshData);
+  }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      async function loadContext() {
+        try {
+          setForecastContext(await loadForecastVersionContext());
+        } catch (error) {
+          console.error("Forecast version context failed", error);
+        }
+      }
+
+      void loadContext();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
   }, []);
 
   async function handleDeckGeneration() {
@@ -139,6 +162,8 @@ export function CFOBrief() {
               actuals: getActualsSourceLabel(activeData.dataSource),
               budget: getBudgetSourceLabel(activeBudget.dataSource),
               cash: getCashSourceLabel(activeCash.dataSource),
+              forecastVersionId: forecastContext?.id ?? null,
+              forecastVersionName: forecastContext?.name ?? null,
               warning:
                 activeData.dataSource === "unapproved" ||
                 activeBudget.dataSource === "unapproved" ||
@@ -248,6 +273,8 @@ export function CFOBrief() {
 
       <AccountMappingNotice />
 
+      <ForecastVersionNotice />
+
       <section className="rounded-md border border-neutral-200 bg-white p-5">
         <h2 className="text-base font-semibold">Monthly CFO Brief</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
@@ -283,6 +310,16 @@ export function CFOBrief() {
       </section>
 
       <FinanceCopilotPanel reportingMonth={generatedMonth} mode="reports" />
+
+      {forecastContext ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5">
+          <h2 className="text-base font-semibold">Forecast Version Context</h2>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">
+            This brief references {forecastContext.name} as the selected or
+            latest forecast version for forward-looking context.
+          </p>
+        </section>
+      ) : null}
 
       <BriefSection title="Executive Summary" items={brief.executiveSummary} />
 

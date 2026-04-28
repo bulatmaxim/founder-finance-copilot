@@ -7,6 +7,7 @@ const navigation = [
   { name: "Account Mapping", href: "/account-mapping" },
   { name: "Budget vs Actuals", href: "/budget-vs-actuals" },
   { name: "Forecasts", href: "/forecasts" },
+  { name: "Forecast Versions", href: "/forecast-versions" },
   { name: "Decision Center", href: "/decision-center" },
   { name: "Reports", href: "/reports" },
   { name: "Company Profile", href: "/company-profile" },

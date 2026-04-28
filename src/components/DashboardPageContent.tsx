@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
+import { ForecastVersionNotice } from "@/components/ForecastVersionNotice";
 import { MetricCard } from "@/components/MetricCard";
 import { AccountMappingNotice } from "@/components/AccountMappingNotice";
 import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
@@ -260,6 +261,7 @@ export function DashboardPageContent() {
               ])}.
             </p>
           ) : null}
+          <ForecastVersionNotice compact />
         </div>
       </div>
 
@@ -269,6 +271,8 @@ export function DashboardPageContent() {
       />
 
       <AccountMappingNotice />
+
+      <ForecastVersionNotice />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => (
