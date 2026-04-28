@@ -3,6 +3,15 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Toast, type ToastMessage, type ToastType } from "@/components/Toast";
 import {
+  applyForecastDriversToVersion,
+  buildForecastDriverPreview,
+  defaultDriverAssumptions,
+  loadForecastDriverAssumptions,
+  saveForecastDriverAssumptions,
+  summarizeForecastDriverAssumptions,
+  type ForecastDriverAssumptions,
+} from "@/lib/forecastDrivers";
+import {
   createForecastVersion,
   dateToDisplayMonth,
   forecastVersionStatuses,
@@ -331,21 +340,240 @@ export default function ForecastVersionsPage() {
       )}
 
       {selectedVersion ? (
-        <ForecastVersionDetails
-          version={selectedVersion}
-          onSaved={async () => {
-            notify("success", "Forecast month updated.");
-            await loadVersions();
-          }}
-          onError={(error) =>
-            notify(
-              "error",
-              "Forecast month could not be updated.",
-              error instanceof Error ? error.message : "Try again.",
-            )
-          }
-        />
+        <>
+          <ForecastDriversSection
+            version={selectedVersion}
+            onSaved={async (title, detail) => {
+              notify("success", title, detail);
+              await loadVersions();
+            }}
+            onError={(title, error) =>
+              notify(
+                "error",
+                title,
+                error instanceof Error ? error.message : "Try again.",
+              )
+            }
+          />
+          <ForecastVersionDetails
+            version={selectedVersion}
+            onSaved={async () => {
+              notify("success", "Forecast month updated.");
+              await loadVersions();
+            }}
+            onError={(error) =>
+              notify(
+                "error",
+                "Forecast month could not be updated.",
+                error instanceof Error ? error.message : "Try again.",
+              )
+            }
+          />
+        </>
       ) : null}
+    </section>
+  );
+}
+
+function ForecastDriversSection({
+  version,
+  onSaved,
+  onError,
+}: {
+  version: ForecastVersionWithRows;
+  onSaved: (title: string, detail?: string) => Promise<void>;
+  onError: (title: string, error: unknown) => void;
+}) {
+  const [assumptions, setAssumptions] =
+    useState<ForecastDriverAssumptions>(defaultDriverAssumptions);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const preview = useMemo(
+    () => buildForecastDriverPreview(version, assumptions),
+    [assumptions, version],
+  );
+  const editableMonths = preview.filter((month) => !month.isLocked).length;
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      async function loadAssumptions() {
+        setIsLoading(true);
+
+        try {
+          setAssumptions(await loadForecastDriverAssumptions(version.id));
+        } catch (error) {
+          console.error("Forecast driver assumptions load failed", error);
+          onError("Forecast drivers could not be loaded.", error);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+
+      void loadAssumptions();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [onError, version.id]);
+
+  function updateAssumption(
+    key: keyof ForecastDriverAssumptions,
+    value: string,
+  ) {
+    setAssumptions((current) => ({
+      ...current,
+      [key]: key === "notes" || key === "oneTimeProfessionalFeeMonth" ? value : Number(value),
+    }));
+  }
+
+  async function handleSave() {
+    setIsSaving(true);
+
+    try {
+      await saveForecastDriverAssumptions({
+        forecastVersionId: version.id,
+        assumptions,
+      });
+      await onSaved(
+        "Forecast driver assumptions saved.",
+        summarizeForecastDriverAssumptions(assumptions),
+      );
+    } catch (error) {
+      console.error("Forecast driver assumptions save failed", error);
+      onError("Forecast drivers could not be saved.", error);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleApply() {
+    if (editableMonths === 0) {
+      onError(
+        "Drivers were not applied.",
+        new Error("This version has no unlocked future forecast months."),
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Apply drivers to ${editableMonths} unlocked forecast month${editableMonths === 1 ? "" : "s"}? This will overwrite current unlocked forecast rows, but locked actualized months will not change.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsApplying(true);
+
+    try {
+      await saveForecastDriverAssumptions({
+        forecastVersionId: version.id,
+        assumptions,
+      });
+      await applyForecastDriversToVersion({ version, assumptions });
+      await onSaved(
+        "Drivers applied to forecast.",
+        "Unlocked future months were updated. Actualized months were preserved.",
+      );
+    } catch (error) {
+      console.error("Forecast driver apply failed", error);
+      onError("Forecast drivers could not be applied.", error);
+    } finally {
+      setIsApplying(false);
+    }
+  }
+
+  return (
+    <section className="rounded-md border border-neutral-200 bg-white p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Forecast Drivers</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500">
+            Build future forecast months from simple business drivers. Locked
+            actualized months are preserved.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={isSaving || isLoading}
+            onClick={() => void handleSave()}
+            className="h-10 rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-400"
+          >
+            {isSaving ? "Saving..." : "Save assumptions"}
+          </button>
+          <button
+            type="button"
+            disabled={isApplying || isLoading}
+            onClick={() => void handleApply()}
+            className="h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+          >
+            {isApplying ? "Applying..." : "Apply Drivers to Forecast"}
+          </button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <p className="mt-5 text-sm text-neutral-500">Loading forecast drivers...</p>
+      ) : (
+        <>
+          <div className="mt-5 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            <DriverCard title="Revenue Drivers">
+              <DriverInput label="Starting MRR" value={assumptions.startingMrr} onChange={(value) => updateAssumption("startingMrr", value)} />
+              <DriverInput label="Monthly growth rate %" value={assumptions.monthlyGrowthRate} onChange={(value) => updateAssumption("monthlyGrowthRate", value)} />
+              <DriverInput label="Churn rate %" value={assumptions.churnRate} onChange={(value) => updateAssumption("churnRate", value)} />
+              <DriverInput label="Expansion revenue %" value={assumptions.expansionRevenueRate} onChange={(value) => updateAssumption("expansionRevenueRate", value)} />
+              <DriverInput label="New customer revenue" value={assumptions.newCustomerRevenue} onChange={(value) => updateAssumption("newCustomerRevenue", value)} />
+            </DriverCard>
+            <DriverCard title="Payroll Drivers">
+              <DriverInput label="Current headcount" value={assumptions.currentHeadcount} onChange={(value) => updateAssumption("currentHeadcount", value)} />
+              <DriverInput label="Planned hires" value={assumptions.plannedHires} onChange={(value) => updateAssumption("plannedHires", value)} />
+              <DriverInput label="Average salary" value={assumptions.averageSalary} onChange={(value) => updateAssumption("averageSalary", value)} />
+              <DriverInput label="Benefits/payroll tax load %" value={assumptions.benefitsLoadRate} onChange={(value) => updateAssumption("benefitsLoadRate", value)} />
+            </DriverCard>
+            <DriverCard title="Hosting / Infrastructure">
+              <DriverInput label="Hosting cost as % of revenue" value={assumptions.hostingRevenueRate} onChange={(value) => updateAssumption("hostingRevenueRate", value)} />
+              <DriverInput label="Fixed monthly hosting cost" value={assumptions.fixedHostingCost} onChange={(value) => updateAssumption("fixedHostingCost", value)} />
+            </DriverCard>
+            <DriverCard title="Software">
+              <DriverInput label="Fixed monthly software cost" value={assumptions.fixedSoftwareCost} onChange={(value) => updateAssumption("fixedSoftwareCost", value)} />
+              <DriverInput label="Software cost per employee" value={assumptions.softwareCostPerEmployee} onChange={(value) => updateAssumption("softwareCostPerEmployee", value)} />
+            </DriverCard>
+            <DriverCard title="Professional Services / Legal">
+              <DriverInput label="Fixed monthly amount" value={assumptions.fixedProfessionalServices} onChange={(value) => updateAssumption("fixedProfessionalServices", value)} />
+              <DriverInput label="One-time legal/professional fee" value={assumptions.oneTimeProfessionalFee} onChange={(value) => updateAssumption("oneTimeProfessionalFee", value)} />
+              <label className="text-sm font-medium text-neutral-700">
+                One-time fee month
+                <input
+                  type="month"
+                  value={assumptions.oneTimeProfessionalFeeMonth.slice(0, 7)}
+                  onChange={(event) =>
+                    updateAssumption(
+                      "oneTimeProfessionalFeeMonth",
+                      event.target.value ? `${event.target.value}-01` : "",
+                    )
+                  }
+                  className="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm outline-none focus:border-neutral-950"
+                />
+              </label>
+            </DriverCard>
+            <DriverCard title="Other Operating Expenses">
+              <DriverInput label="Fixed monthly amount" value={assumptions.fixedOtherOpex} onChange={(value) => updateAssumption("fixedOtherOpex", value)} />
+              <DriverInput label="Growth rate %" value={assumptions.otherOpexGrowthRate} onChange={(value) => updateAssumption("otherOpexGrowthRate", value)} />
+              <label className="text-sm font-medium text-neutral-700">
+                Notes
+                <input
+                  value={assumptions.notes}
+                  onChange={(event) => updateAssumption("notes", event.target.value)}
+                  className="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm outline-none focus:border-neutral-950"
+                />
+              </label>
+            </DriverCard>
+          </div>
+
+          <DriverPreviewTable rows={preview} />
+        </>
+      )}
     </section>
   );
 }
@@ -445,6 +673,100 @@ function ForecastVersionTable({
                     </SmallButton>
                   </div>
                 </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function DriverCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <article className="rounded-md border border-neutral-200 p-4">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <div className="mt-4 space-y-3">{children}</div>
+    </article>
+  );
+}
+
+function DriverInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="text-sm font-medium text-neutral-700">
+      {label}
+      <input
+        type="number"
+        value={Number.isFinite(value) ? value : 0}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm outline-none focus:border-neutral-950"
+      />
+    </label>
+  );
+}
+
+function DriverPreviewTable({
+  rows,
+}: {
+  rows: ReturnType<typeof buildForecastDriverPreview>;
+}) {
+  return (
+    <section className="mt-6 overflow-hidden rounded-md border border-neutral-200">
+      <div className="border-b border-neutral-200 px-4 py-3">
+        <h3 className="text-sm font-semibold">Driver Preview</h3>
+        <p className="mt-1 text-sm text-neutral-500">
+          Previewed driver impact before applying to unlocked future forecast months.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] text-right text-sm">
+          <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-600">
+            <tr>
+              <th className="px-4 py-3 text-left font-medium">Month</th>
+              <th className="px-4 py-3 font-medium">Type</th>
+              <th className="px-4 py-3 font-medium">Revenue</th>
+              <th className="px-4 py-3 font-medium">Hosting</th>
+              <th className="px-4 py-3 font-medium">Payroll</th>
+              <th className="px-4 py-3 font-medium">Software</th>
+              <th className="px-4 py-3 font-medium">Professional</th>
+              <th className="px-4 py-3 font-medium">Other OpEx</th>
+              <th className="px-4 py-3 font-medium">EBITDA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.month} className="border-b border-neutral-100">
+                <td className="px-4 py-3 text-left font-medium">{row.month}</td>
+                <td className="px-4 py-3">
+                  <span className="rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
+                    {row.isLocked ? "Locked actual" : row.rowType}
+                  </span>
+                </td>
+                <td className="px-4 py-3">{formatCurrency(row.revenue)}</td>
+                <td className="px-4 py-3">{formatCurrency(row.hosting)}</td>
+                <td className="px-4 py-3">{formatCurrency(row.payroll)}</td>
+                <td className="px-4 py-3">{formatCurrency(row.software)}</td>
+                <td className="px-4 py-3">
+                  {formatCurrency(row.professionalServices)}
+                </td>
+                <td className="px-4 py-3">
+                  {formatCurrency(row.otherOperatingExpenses)}
+                </td>
+                <td className="px-4 py-3">{formatCurrency(row.ebitda)}</td>
               </tr>
             ))}
           </tbody>

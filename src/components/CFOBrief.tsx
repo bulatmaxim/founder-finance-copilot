@@ -47,6 +47,11 @@ import {
   loadForecastVersionContext,
   type ForecastVersionContext,
 } from "@/lib/forecastVersions";
+import {
+  loadForecastDriverAssumptions,
+  loadForecastDriverAssumptionRecords,
+  summarizeForecastDriverAssumptions,
+} from "@/lib/forecastDrivers";
 
 type Highlight = {
   label: string;
@@ -88,6 +93,7 @@ export function CFOBrief() {
   const [isGeneratingDeck, setIsGeneratingDeck] = useState(false);
   const [forecastContext, setForecastContext] =
     useState<ForecastVersionContext | null>(null);
+  const [forecastDriverSummary, setForecastDriverSummary] = useState("");
 
   const brief = useMemo(
     () => buildBriefForMonth(generatedMonth),
@@ -113,6 +119,43 @@ export function CFOBrief() {
 
     return () => window.removeEventListener("founder-finance-data-hydrated", refreshData);
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      async function loadDriverSummary() {
+        if (!forecastContext) {
+          setForecastDriverSummary("");
+          return;
+        }
+
+        try {
+          const records = await loadForecastDriverAssumptionRecords(
+            forecastContext.id,
+          );
+
+          if (records.length === 0) {
+            setForecastDriverSummary("");
+            return;
+          }
+
+          const assumptions = await loadForecastDriverAssumptions(
+            forecastContext.id,
+          );
+
+          setForecastDriverSummary(
+            summarizeForecastDriverAssumptions(assumptions),
+          );
+        } catch (error) {
+          console.error("Forecast driver assumptions failed", error);
+          setForecastDriverSummary("");
+        }
+      }
+
+      void loadDriverSummary();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [forecastContext]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -164,6 +207,7 @@ export function CFOBrief() {
               cash: getCashSourceLabel(activeCash.dataSource),
               forecastVersionId: forecastContext?.id ?? null,
               forecastVersionName: forecastContext?.name ?? null,
+              forecastDriverSummary: forecastDriverSummary || null,
               warning:
                 activeData.dataSource === "unapproved" ||
                 activeBudget.dataSource === "unapproved" ||
@@ -317,6 +361,9 @@ export function CFOBrief() {
           <p className="mt-2 text-sm leading-6 text-neutral-600">
             This brief references {forecastContext.name} as the selected or
             latest forecast version for forward-looking context.
+            {forecastDriverSummary
+              ? ` Key assumptions include ${forecastDriverSummary}.`
+              : ""}
           </p>
         </section>
       ) : null}

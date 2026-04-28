@@ -24,6 +24,11 @@ import {
   formatVarianceLabel,
 } from "@/lib/formatting";
 import {
+  loadForecastDriverAssumptions,
+  loadForecastDriverAssumptionRecords,
+  summarizeForecastDriverAssumptions,
+} from "@/lib/forecastDrivers";
+import {
   forecastVersionToDisplayVersion,
   getSelectedForecastVersionId,
   loadForecastVersionsForDisplay,
@@ -116,6 +121,7 @@ export default function ForecastsPage() {
   const [managedForecastVersions, setManagedForecastVersions] = useState<
     ForecastVersionWithRows[]
   >([]);
+  const [driverSummary, setDriverSummary] = useState("");
   const [activeData, setActiveData] = useState<ActiveFinancialData>(() =>
     getActiveFinancialData(),
   );
@@ -178,6 +184,41 @@ export default function ForecastsPage() {
   const selectedManagedVersion = managedForecastVersions.find(
     (version) => version.id === selectedVersion.id,
   );
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      async function loadDriverSummary() {
+        if (!selectedManagedVersion) {
+          setDriverSummary("");
+          return;
+        }
+
+        try {
+          const records = await loadForecastDriverAssumptionRecords(
+            selectedManagedVersion.id,
+          );
+
+          if (records.length === 0) {
+            setDriverSummary("");
+            return;
+          }
+
+          const assumptions = await loadForecastDriverAssumptions(
+            selectedManagedVersion.id,
+          );
+
+          setDriverSummary(summarizeForecastDriverAssumptions(assumptions));
+        } catch (error) {
+          console.error("Forecast driver summary failed", error);
+          setDriverSummary("");
+        }
+      }
+
+      void loadDriverSummary();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [selectedManagedVersion]);
   const budget = getBudgetVersion(availableForecastVersions);
   const latest = selectedVersion;
   const comparisonVersions = uniqueVersions([
@@ -244,6 +285,9 @@ export default function ForecastsPage() {
             <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
             <DataSourceBadge label={getForecastSourceLabel(activeForecast.dataSource)} />
             <DataSourceBadge label={`Forecast Version: ${selectedVersion.name}`} />
+            <DataSourceBadge
+              label={driverSummary ? "Forecast Method: Driver-based" : "Forecast Method: Manual"}
+            />
             {isCompanyDataSource(activeData.dataSource) ||
             isCompanyDataSource(activeBudget.dataSource) ||
             isCompanyDataSource(activeCash.dataSource) ||
@@ -314,6 +358,15 @@ export default function ForecastsPage() {
           {selectedManagedVersion.name} requests actuals through{" "}
           {selectedManagedVersion.actuals_through_month}, but no approved Data
           Room actuals were found for those months.
+        </section>
+      ) : null}
+
+      {driverSummary ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5">
+          <h2 className="text-base font-semibold">Key Forecast Assumptions</h2>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">
+            {selectedVersion.name} assumes {driverSummary}.
+          </p>
         </section>
       ) : null}
 
