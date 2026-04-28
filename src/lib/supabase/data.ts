@@ -747,7 +747,7 @@ export async function saveGeneratedReportToSupabase({
       storage_path: storagePath,
       data_source: dataSource ?? null,
     })
-    .select("id")
+    .select("id, storage_path")
     .single();
 
   if (error) {
