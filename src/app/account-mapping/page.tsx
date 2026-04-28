@@ -107,6 +107,20 @@ export default function AccountMappingPage() {
   }
 
   async function handleApplySuggested() {
+    const savedMappingsToOverwrite = rows.filter(
+      (row) => row.id && row.status !== "Unmapped",
+    );
+
+    if (savedMappingsToOverwrite.length > 0) {
+      const confirmed = window.confirm(
+        `Apply suggested mappings to ${savedMappingsToOverwrite.length} saved mapping${savedMappingsToOverwrite.length === 1 ? "" : "s"} that are not currently unmapped? Existing selected categories may be overwritten.`,
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
     setIsSavingAll(true);
 
     try {

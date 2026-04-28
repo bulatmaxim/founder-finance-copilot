@@ -420,6 +420,8 @@ export default function ReportsPage() {
         />
       )}
 
+      <ReportSourcePanel dataSource={dataSource} />
+
       <ReportPreview
         reportTitle={reportTitle}
         reportType={reportType}
@@ -438,6 +440,39 @@ export default function ReportsPage() {
         reports={history}
         onDownload={(report) => void handleDownload(report)}
       />
+    </section>
+  );
+}
+
+function ReportSourcePanel({
+  dataSource,
+}: {
+  dataSource: Record<string, unknown>;
+}) {
+  const rows = [
+    ["Actuals", String(dataSource.actuals ?? "Unknown")],
+    ["Budget", String(dataSource.budget ?? "Unknown")],
+    ["Cash", String(dataSource.cash ?? "Unknown")],
+    ["Monthly close", String(dataSource.closeStatus ?? "Unknown")],
+    [
+      "Forecast version",
+      String(dataSource.forecastVersionName ?? "No saved forecast selected"),
+    ],
+  ];
+
+  return (
+    <section className="rounded-md border border-neutral-200 bg-white p-5">
+      <h2 className="text-base font-semibold">Report Data Sources</h2>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        {rows.map(([label, value]) => (
+          <article key={label} className="rounded-md border border-neutral-200 p-3">
+            <p className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+              {label}
+            </p>
+            <p className="mt-2 text-sm font-medium text-neutral-800">{value}</p>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }

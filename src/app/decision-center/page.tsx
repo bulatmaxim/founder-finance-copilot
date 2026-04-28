@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
+import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
 import { sampleCompany } from "@/data/sampleCompany";
 import { sampleFinancials } from "@/data/sampleFinancials";
 import {
@@ -13,6 +14,14 @@ import {
   formatCurrency,
   formatRunwayMonths,
 } from "@/lib/formatting";
+import {
+  getActiveCashData,
+  getActiveFinancialData,
+  getActualsSourceLabel,
+  getCashSourceLabel,
+  type ActiveCashData,
+  type ActiveFinancialData,
+} from "@/lib/localDataStore";
 
 type HireForm = {
   roleTitle: string;
@@ -53,8 +62,25 @@ const initialForm: HireForm = {
 export default function DecisionCenterPage() {
   const [draft, setDraft] = useState<HireForm>(initialForm);
   const [submitted, setSubmitted] = useState<HireForm>(initialForm);
+  const [activeData] = useState<ActiveFinancialData>(() => getActiveFinancialData());
+  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
 
-  const analysis = useMemo(() => buildHireAnalysis(submitted), [submitted]);
+  const latestActiveFinancials =
+    activeData.periods[activeData.periods.length - 1] ?? latestFinancials;
+  const latestCashMetrics = activeCash.periods.at(-1);
+  const baseline = useMemo(
+    () => ({
+      month: latestActiveFinancials.month,
+      cashBalance: latestCashMetrics?.cashBalance ?? latestActiveFinancials.cashBalance,
+      netBurn: latestCashMetrics?.netBurn ?? latestActiveFinancials.netBurn,
+      runwayMonths: latestCashMetrics?.runwayMonths ?? latestActiveFinancials.runwayMonths,
+    }),
+    [latestActiveFinancials, latestCashMetrics],
+  );
+  const analysis = useMemo(
+    () => buildHireAnalysis(submitted, baseline),
+    [baseline, submitted],
+  );
 
   return (
     <section className="space-y-8">
@@ -68,9 +94,18 @@ export default function DecisionCenterPage() {
         <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
           Local decision-support workflow for {sampleCompany.name}. This model
           estimates how one hire changes burn, runway, and cash-out timing using
-          sample financial data only.
+          the active finance data source.
         </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
+          <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
+        </div>
       </div>
+
+      <ReportingSourceNotice
+        reportingMonth={latestActiveFinancials.month}
+        sources={[activeData.dataSource, activeCash.dataSource]}
+      />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
         <HireInputForm
@@ -82,21 +117,21 @@ export default function DecisionCenterPage() {
         <section className="rounded-md border border-neutral-200 bg-white p-5">
           <h2 className="text-base font-semibold">Current Baseline</h2>
           <p className="mt-1 text-sm text-neutral-500">
-            Latest month: {latestFinancials.month}
+            Latest month: {latestActiveFinancials.month}
           </p>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-3">
             <BaselineMetric
               label="Cash balance"
-              value={formatCurrency(latestFinancials.cashBalance)}
+              value={formatCurrency(latestCashMetrics?.cashBalance ?? latestActiveFinancials.cashBalance)}
             />
             <BaselineMetric
               label="Net burn"
-              value={formatCurrency(latestFinancials.netBurn)}
+              value={formatCurrency(latestCashMetrics?.netBurn ?? latestActiveFinancials.netBurn)}
             />
             <BaselineMetric
               label="Runway"
-              value={formatRunwayMonths(currentRunwayMonths)}
+              value={formatRunwayMonths(latestCashMetrics?.runwayMonths ?? latestActiveFinancials.runwayMonths)}
             />
           </div>
 
@@ -114,7 +149,7 @@ export default function DecisionCenterPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <SummaryCard
           label="Current runway"
-          value={formatRunwayMonths(currentRunwayMonths)}
+          value={formatRunwayMonths(baseline.runwayMonths)}
         />
         <SummaryCard
           label="New runway"
@@ -190,11 +225,19 @@ export default function DecisionCenterPage() {
       </div>
 
       <FinanceCopilotPanel
-        reportingMonth={latestFinancials.month}
+        reportingMonth={baseline.month}
         mode="dashboard"
         showAsk
       />
     </section>
+  );
+}
+
+function DataSourceBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
+      {label}
+    </span>
   );
 }
 
@@ -352,7 +395,15 @@ function ScenarioTable({
   );
 }
 
-function buildHireAnalysis(form: HireForm) {
+function buildHireAnalysis(
+  form: HireForm,
+  baseline = {
+    month: latestFinancials.month,
+    cashBalance: latestFinancials.cashBalance,
+    netBurn: latestFinancials.netBurn,
+    runwayMonths: currentRunwayMonths,
+  },
+) {
   const costImpact = calculateHireCostImpact({
     annualSalary: form.annualSalary,
     bonusPercent: form.bonusPercent,
@@ -363,36 +414,36 @@ function buildHireAnalysis(form: HireForm) {
 
   const currentScenario = calculateHireScenario({
     name: "Current case",
-    currentCashBalance: latestFinancials.cashBalance,
-    currentNetBurn: latestFinancials.netBurn,
-    currentRunwayMonths,
+    currentCashBalance: baseline.cashBalance,
+    currentNetBurn: baseline.netBurn,
+    currentRunwayMonths: baseline.runwayMonths,
     monthlyBurnImpact: 0,
   });
   const bestScenario = calculateHireScenario({
     name: "Best case",
-    currentCashBalance: latestFinancials.cashBalance,
-    currentNetBurn: latestFinancials.netBurn,
-    currentRunwayMonths,
+    currentCashBalance: baseline.cashBalance,
+    currentNetBurn: baseline.netBurn,
+    currentRunwayMonths: baseline.runwayMonths,
     monthlyBurnImpact: costImpact.totalMonthlyCostImpact * 0.75,
   });
   const baseScenario = calculateHireScenario({
     name: "Base case",
-    currentCashBalance: latestFinancials.cashBalance,
-    currentNetBurn: latestFinancials.netBurn,
-    currentRunwayMonths,
+    currentCashBalance: baseline.cashBalance,
+    currentNetBurn: baseline.netBurn,
+    currentRunwayMonths: baseline.runwayMonths,
     monthlyBurnImpact: costImpact.totalMonthlyCostImpact,
   });
   const worstScenario = calculateHireScenario({
     name: "Worst case",
-    currentCashBalance: latestFinancials.cashBalance,
-    currentNetBurn: latestFinancials.netBurn,
-    currentRunwayMonths,
+    currentCashBalance: baseline.cashBalance,
+    currentNetBurn: baseline.netBurn,
+    currentRunwayMonths: baseline.runwayMonths,
     monthlyBurnImpact: costImpact.totalMonthlyCostImpact * 1.15,
   });
 
   const recommendation = getRecommendation(baseScenario.runwayMonths, form);
   const estimatedCashOutDate = estimateCashOutDate(
-    latestFinancials.month,
+    baseline.month,
     baseScenario.runwayMonths,
   );
 
@@ -409,6 +460,7 @@ function buildHireAnalysis(form: HireForm) {
       baseScenario.runwayMonths,
       baseScenario.runwayChangeMonths,
       costImpact.totalMonthlyCostImpact,
+      baseline.runwayMonths,
     ),
     suggestedActions: getSuggestedActions(baseScenario.runwayMonths),
     estimatedCashOutDate,
@@ -494,8 +546,9 @@ function getFounderTakeaway(
   newRunway: number,
   runwayChange: number,
   monthlyCostImpact: number,
+  baselineRunwayMonths: number,
 ) {
-  return `${form.scenarioName} adds ${formatCurrency(monthlyCostImpact)} of monthly burn beginning in ${form.startMonth}. In the base case, runway moves from ${formatRunwayMonths(currentRunwayMonths)} to ${formatRunwayMonths(newRunway)}, a change of ${formatMonthChange(runwayChange)}. This is a financeable decision only if the role has a clear link to revenue, product delivery, or operating leverage.`;
+  return `${form.scenarioName} adds ${formatCurrency(monthlyCostImpact)} of monthly burn beginning in ${form.startMonth}. In the base case, runway moves from ${formatRunwayMonths(baselineRunwayMonths)} to ${formatRunwayMonths(newRunway)}, a change of ${formatMonthChange(runwayChange)}. This is a financeable decision only if the role has a clear link to revenue, product delivery, or operating leverage.`;
 }
 
 function getSuggestedActions(runwayMonths: number) {
