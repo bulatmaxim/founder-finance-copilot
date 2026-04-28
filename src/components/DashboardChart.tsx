@@ -75,17 +75,17 @@ export function DashboardChart({
           <ResponsiveContainer width="100%" height="100%">
             {variant === "bar" ? (
               <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="rgba(148, 163, 184, 0.14)" vertical={false} />
+                <CartesianGrid stroke="var(--line-soft)" vertical={false} />
               <XAxis
                 dataKey="month"
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: "#94a3b8", fontSize: 12 }}
+                tick={{ fill: "var(--text-muted)", fontSize: 12 }}
               />
               <YAxis
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: "#94a3b8", fontSize: 12 }}
+                tick={{ fill: "var(--text-muted)", fontSize: 12 }}
                 tickFormatter={(value) => formatValue(Number(value))}
               />
               <Tooltip
@@ -96,11 +96,11 @@ export function DashboardChart({
                 ]}
                 labelClassName="font-medium"
                 contentStyle={{
-                  background: "#0b1017",
-                  border: "1px solid rgba(148, 163, 184, 0.22)",
+                  background: "var(--surface-1)",
+                  border: "1px solid var(--line-soft)",
                   borderRadius: 14,
                   boxShadow: "0 18px 40px rgba(0, 0, 0, 0.4)",
-                  color: "#f8fafc",
+                  color: "var(--text-strong)",
                 }}
               />
               {series.map((item) => (
@@ -115,17 +115,17 @@ export function DashboardChart({
             </BarChart>
           ) : (
             <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid stroke="rgba(148, 163, 184, 0.14)" vertical={false} />
+              <CartesianGrid stroke="var(--line-soft)" vertical={false} />
               <XAxis
                 dataKey="month"
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: "#94a3b8", fontSize: 12 }}
+                tick={{ fill: "var(--text-muted)", fontSize: 12 }}
               />
               <YAxis
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: "#94a3b8", fontSize: 12 }}
+                tick={{ fill: "var(--text-muted)", fontSize: 12 }}
                 tickFormatter={(value) => formatValue(Number(value))}
               />
               <Tooltip
@@ -135,11 +135,11 @@ export function DashboardChart({
                 ]}
                 labelClassName="font-medium"
                 contentStyle={{
-                  background: "#0b1017",
-                  border: "1px solid rgba(148, 163, 184, 0.22)",
+                  background: "var(--surface-1)",
+                  border: "1px solid var(--line-soft)",
                   borderRadius: 14,
                   boxShadow: "0 18px 40px rgba(0, 0, 0, 0.4)",
-                  color: "#f8fafc",
+                  color: "var(--text-strong)",
                 }}
               />
               {series.map((item) => (
