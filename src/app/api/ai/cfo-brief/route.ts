@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getOpenAIClient, getOpenAIModel } from "@/lib/aiClient";
 
+export const runtime = "nodejs";
+
 const cfoBriefSchema = {
   type: "object",
   additionalProperties: false,
@@ -153,7 +155,7 @@ export async function POST(request: Request) {
       {
         error: message.includes("OPENAI_API_KEY")
           ? "OpenAI API key is not configured on the server."
-          : `AI CFO Brief failed: ${message}`,
+          : "AI CFO Brief failed. Please try again after reviewing the finance summary.",
       },
       { status },
     );

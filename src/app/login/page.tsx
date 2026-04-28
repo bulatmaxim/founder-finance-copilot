@@ -48,7 +48,11 @@ export default function LoginPage() {
         typeof window !== "undefined"
           ? new URLSearchParams(window.location.search).get("redirectedFrom")
           : null;
-      router.push(redirectedFrom || "/dashboard");
+      router.push(
+        redirectedFrom?.startsWith("/") && !redirectedFrom.startsWith("//")
+          ? redirectedFrom
+          : "/dashboard",
+      );
       router.refresh();
     } catch (error) {
       console.error("Login failed", error);
