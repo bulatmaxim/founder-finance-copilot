@@ -60,6 +60,17 @@ export type MonthlyCloseItem = {
   updated_at: string | null;
 };
 
+export type MonthlyCloseActivity = {
+  id: string;
+  user_id: string | null;
+  company_id: string;
+  reporting_month: string;
+  file_category: MonthlyCloseCategory;
+  action: string;
+  details: Record<string, unknown> | null;
+  created_at: string | null;
+};
+
 export type MonthlyCloseCategoryConfig = {
   id: MonthlyCloseCategory;
   title: string;
@@ -137,13 +148,16 @@ export const monthlyCloseCategories: MonthlyCloseCategoryConfig[] = [
 ];
 
 export function getReportingMonthOptions() {
-  const year = 2026;
-  const monthsToShow = 4;
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth() - 12, 1);
+  const monthCount = 16;
 
-  return Array.from({ length: monthsToShow }, (_, index) => {
-    const month = index + 1;
-    const value = `${year}-${String(month).padStart(2, "0")}-01`;
-
+  return Array.from({ length: monthCount }, (_, index) => {
+    const date = new Date(start.getFullYear(), start.getMonth() + index, 1);
+    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-01`;
     return {
       value,
       label: formatReportingMonth(value),
@@ -192,6 +206,12 @@ export function collectValidationIssues(items: MonthlyCloseItem[]) {
   return items.flatMap((item) => item.validation_summary?.issues ?? []);
 }
 
+export function hasCriticalValidationIssues(item: MonthlyCloseItem) {
+  return (item.validation_summary?.issues ?? []).some(
+    (issue) => issue.severity === "Critical",
+  );
+}
+
 export async function loadMonthlyCloseItems(reportingMonth: string) {
   if (!hasSupabaseBrowserEnv()) {
     throw new Error("Supabase is not configured for this local environment.");
@@ -238,6 +258,7 @@ export async function loadMonthlyCloseItems(reportingMonth: string) {
     user,
     company,
     items: await fetchItems(company.id, reportingMonth),
+    activity: await fetchActivity(company.id, reportingMonth),
   };
 }
 
@@ -271,6 +292,8 @@ export async function uploadMonthlyCloseFile({
     throw new Error("Unknown monthly close file category.");
   }
 
+  const existingItem = await fetchItem(company.id, reportingMonth, fileCategory);
+  const isReplacement = Boolean(existingItem?.uploaded_file_id);
   const csvText = await file.text();
   const storagePath = `${user.id}/${company.id}/monthly-close/${reportingMonth}/${fileCategory}/${Date.now()}-${sanitizeFileName(
     file.name,
@@ -304,6 +327,8 @@ export async function uploadMonthlyCloseFile({
     : buildRawFileValidationSummary(fileCategory);
   const status = hasValidationIssue(validationSummary) ? "Needs review" : "Uploaded";
 
+  await markExistingUploadsInactive(company.id, reportingMonth, fileCategory);
+
   const { data: uploadedFile, error: fileError } = await supabase
     .from("uploaded_files")
     .insert({
@@ -321,6 +346,7 @@ export async function uploadMonthlyCloseFile({
       error_count: validationSummary.errorRows,
       warning_count: validationSummary.warningRows,
       uploaded_at: new Date().toISOString(),
+      is_active: true,
     })
     .select("id")
     .single();
@@ -364,6 +390,20 @@ export async function uploadMonthlyCloseFile({
     throw new Error(`Checklist update failed: ${itemError.message}`);
   }
 
+  await logMonthlyCloseActivity({
+    userId: user.id,
+    companyId: company.id,
+    reportingMonth,
+    fileCategory,
+    action: isReplacement ? "replaced_file" : "uploaded_file",
+    details: {
+      file_name: file.name,
+      uploaded_file_id: uploadedFile.id,
+      prior_uploaded_file_id: existingItem?.uploaded_file_id ?? null,
+      status,
+    },
+  });
+
   return loadMonthlyCloseItems(reportingMonth);
 }
 
@@ -383,6 +423,12 @@ export async function updateMonthlyCloseItemStatus({
 
   if (status === "Approved" && item.status === "Not uploaded") {
     throw new Error("Upload a file before approving this checklist item.");
+  }
+
+  if (status === "Approved" && hasCriticalValidationIssues(item)) {
+    throw new Error(
+      "This file has critical validation issues. Resolve or replace the file before approving.",
+    );
   }
 
   const approvedFields =
@@ -408,6 +454,71 @@ export async function updateMonthlyCloseItemStatus({
   if (error) {
     throw new Error(`Monthly close status update failed: ${error.message}`);
   }
+
+  await logMonthlyCloseActivity({
+    userId: user.id,
+    companyId: item.company_id,
+    reportingMonth: item.reporting_month,
+    fileCategory: item.file_category,
+    action: status === "Approved" ? "approved_file" : "marked_needs_review",
+    details: {
+      file_name: item.file_name,
+      uploaded_file_id: item.uploaded_file_id,
+    },
+  });
+
+  return loadMonthlyCloseItems(item.reporting_month);
+}
+
+export async function removeMonthlyCloseFile(item: MonthlyCloseItem) {
+  const supabase = createClient();
+  const { user } = await getCurrentCompany();
+
+  if (!user) {
+    throw new Error("Log in before removing files.");
+  }
+
+  if (item.uploaded_file_id) {
+    const { error: uploadError } = await supabase
+      .from("uploaded_files")
+      .update({ is_active: false, status: "removed" })
+      .eq("id", item.uploaded_file_id);
+
+    if (uploadError) {
+      throw new Error(`Upload record update failed: ${uploadError.message}`);
+    }
+  }
+
+  const { error } = await supabase
+    .from("monthly_close_items")
+    .update({
+      status: "Not uploaded",
+      file_name: null,
+      storage_path: null,
+      uploaded_file_id: null,
+      uploaded_at: null,
+      approved_at: null,
+      approved_by: null,
+      validation_summary: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", item.id);
+
+  if (error) {
+    throw new Error(`Monthly close file removal failed: ${error.message}`);
+  }
+
+  await logMonthlyCloseActivity({
+    userId: user.id,
+    companyId: item.company_id,
+    reportingMonth: item.reporting_month,
+    fileCategory: item.file_category,
+    action: "removed_file",
+    details: {
+      file_name: item.file_name,
+      uploaded_file_id: item.uploaded_file_id,
+    },
+  });
 
   return loadMonthlyCloseItems(item.reporting_month);
 }
@@ -555,6 +666,94 @@ async function fetchItems(companyId: string, reportingMonth: string) {
   }
 
   return orderItems((data ?? []) as MonthlyCloseItem[]);
+}
+
+async function fetchItem(
+  companyId: string,
+  reportingMonth: string,
+  fileCategory: MonthlyCloseCategory,
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("monthly_close_items")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("reporting_month", reportingMonth)
+    .eq("file_category", fileCategory)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Monthly close item lookup failed: ${error.message}`);
+  }
+
+  return data as MonthlyCloseItem | null;
+}
+
+async function fetchActivity(companyId: string, reportingMonth: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("monthly_close_activity")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("reporting_month", reportingMonth)
+    .order("created_at", { ascending: false })
+    .limit(12);
+
+  if (error) {
+    console.error("Monthly close activity load failed", error);
+    return [];
+  }
+
+  return (data ?? []) as MonthlyCloseActivity[];
+}
+
+async function markExistingUploadsInactive(
+  companyId: string,
+  reportingMonth: string,
+  fileCategory: MonthlyCloseCategory,
+) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("uploaded_files")
+    .update({ is_active: false })
+    .eq("company_id", companyId)
+    .eq("reporting_month", reportingMonth)
+    .eq("file_category", fileCategory)
+    .eq("is_active", true);
+
+  if (error) {
+    throw new Error(`Prior upload update failed: ${error.message}`);
+  }
+}
+
+async function logMonthlyCloseActivity({
+  userId,
+  companyId,
+  reportingMonth,
+  fileCategory,
+  action,
+  details,
+}: {
+  userId: string;
+  companyId: string;
+  reportingMonth: string;
+  fileCategory: MonthlyCloseCategory;
+  action: string;
+  details: Record<string, unknown>;
+}) {
+  const supabase = createClient();
+  const { error } = await supabase.from("monthly_close_activity").insert({
+    user_id: userId,
+    company_id: companyId,
+    reporting_month: reportingMonth,
+    file_category: fileCategory,
+    action,
+    details,
+  });
+
+  if (error) {
+    console.error("Monthly close activity log failed", error);
+  }
 }
 
 function orderItems(items: MonthlyCloseItem[]) {

@@ -16,6 +16,7 @@ type MonthlyCloseChecklistProps = {
     item: MonthlyCloseItem,
     status: Exclude<MonthlyCloseStatus, "Not uploaded">,
   ) => void;
+  onRemove: (item: MonthlyCloseItem) => void;
 };
 
 export function MonthlyCloseChecklist({
@@ -25,6 +26,7 @@ export function MonthlyCloseChecklist({
   savingItemId,
   onUpload,
   onStatusChange,
+  onRemove,
 }: MonthlyCloseChecklistProps) {
   const itemByCategory = new Map(
     items.map((item) => [item.file_category, item]),
@@ -71,6 +73,7 @@ export function MonthlyCloseChecklist({
                 const isSaving = savingItemId === item.id;
                 const canReview = item.status !== "Not uploaded";
                 const canApprove = item.status !== "Not uploaded";
+                const hasUploadedFile = Boolean(item.uploaded_file_id);
 
                 return (
                   <tr key={category.id} className="border-b border-neutral-100 align-top">
@@ -102,7 +105,11 @@ export function MonthlyCloseChecklist({
                     <td className="px-4 py-4">
                       <div className="flex flex-wrap gap-2">
                         <label className="inline-flex h-9 cursor-pointer items-center rounded-md border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-950 hover:bg-neutral-50">
-                          {isUploading ? "Uploading..." : "Upload"}
+                          {isUploading
+                            ? "Uploading..."
+                            : hasUploadedFile
+                              ? "Replace file"
+                              : "Upload"}
                           <input
                             type="file"
                             accept=".csv,text/csv"
@@ -135,6 +142,16 @@ export function MonthlyCloseChecklist({
                         >
                           {isSaving ? "Saving..." : "Approve"}
                         </button>
+                        {hasUploadedFile ? (
+                          <button
+                            type="button"
+                            disabled={isSaving || isUploading}
+                            onClick={() => onRemove(item)}
+                            className="h-9 rounded-md border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-950 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-400"
+                          >
+                            Remove file
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -167,18 +184,18 @@ function StatusBadge({ status }: { status: MonthlyCloseStatus }) {
 
 function ValidationBadge({ item }: { item: MonthlyCloseItem }) {
   const issues = item.validation_summary?.issues ?? [];
-  const hasCritical = issues.some((issue) => issue.severity === "Critical");
-  const hasWarning = issues.some((issue) => issue.severity === "Warning");
-  const hasInfo = issues.some((issue) => issue.severity === "Info");
+  const criticalCount = issues.filter((issue) => issue.severity === "Critical").length;
+  const warningCount = issues.filter((issue) => issue.severity === "Warning").length;
+  const infoCount = issues.filter((issue) => issue.severity === "Info").length;
 
-  const label = hasCritical
-    ? "Critical issues"
-    : hasWarning
-      ? "Needs review"
-      : hasInfo
+  const label = criticalCount > 0
+    ? `${criticalCount} critical issue${criticalCount === 1 ? "" : "s"}`
+    : warningCount > 0
+      ? `${warningCount} warning${warningCount === 1 ? "" : "s"}`
+      : infoCount > 0
         ? "Info"
         : item.status === "Not uploaded"
-          ? "Pending upload"
+          ? "Not checked"
           : "No issues";
 
   return (

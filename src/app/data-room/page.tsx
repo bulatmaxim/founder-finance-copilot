@@ -12,8 +12,10 @@ import {
   getReportingMonthOptions,
   loadMonthlyCloseItems,
   reportingMonthKey,
+  removeMonthlyCloseFile,
   updateMonthlyCloseItemStatus,
   uploadMonthlyCloseFile,
+  type MonthlyCloseActivity,
   type MonthlyCloseCategory,
   type MonthlyCloseItem,
   type MonthlyCloseStatus,
@@ -21,10 +23,19 @@ import {
 
 export default function DataRoomPage() {
   const reportingMonths = useMemo(() => getReportingMonthOptions(), []);
+  const currentReportingMonth = useMemo(() => {
+    const today = new Date();
+
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-01`;
+  }, []);
   const [selectedMonth, setSelectedMonth] = useState(
-    reportingMonths[reportingMonths.length - 1]?.value ?? "2026-04-01",
+    currentReportingMonth,
   );
   const [items, setItems] = useState<MonthlyCloseItem[]>([]);
+  const [activity, setActivity] = useState<MonthlyCloseActivity[]>([]);
   const [companyName, setCompanyName] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [uploadingCategory, setUploadingCategory] =
@@ -47,9 +58,11 @@ export default function DataRoomPage() {
         const result = await loadMonthlyCloseItems(reportingMonth);
         setCompanyName(result.company.name);
         setItems(result.items);
+        setActivity(result.activity);
       } catch (error) {
         console.error("Data Room load failed", error);
         setItems([]);
+        setActivity([]);
         notify(
           "error",
           "Monthly close checklist could not be loaded.",
@@ -85,6 +98,7 @@ export default function DataRoomPage() {
         file,
       });
       setItems(result.items);
+      setActivity(result.activity);
       setCompanyName(result.company.name);
       notify(
         "success",
@@ -112,12 +126,46 @@ export default function DataRoomPage() {
     try {
       const result = await updateMonthlyCloseItemStatus({ item, status });
       setItems(result.items);
+      setActivity(result.activity);
       notify("success", `Marked ${status}.`);
     } catch (error) {
       console.error("Monthly close status update failed", error);
       notify(
         "error",
         "Status update failed.",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      setSavingItemId(null);
+    }
+  }
+
+  async function handleRemove(item: MonthlyCloseItem) {
+    if (!item.uploaded_file_id) {
+      notify("info", "No uploaded file to remove.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Remove ${item.file_name ?? "this file"} from the monthly close checklist? Parsed dashboard data will not be deleted.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setSavingItemId(item.id);
+
+    try {
+      const result = await removeMonthlyCloseFile(item);
+      setItems(result.items);
+      setActivity(result.activity);
+      notify("success", "File removed from checklist.");
+    } catch (error) {
+      console.error("Monthly close file removal failed", error);
+      notify(
+        "error",
+        "Remove file failed.",
         error instanceof Error ? error.message : "Try again.",
       );
     } finally {
@@ -201,13 +249,84 @@ export default function DataRoomPage() {
             onStatusChange={(item, status) =>
               void handleStatusChange(item, status)
             }
+            onRemove={(item) => void handleRemove(item)}
           />
           <DataQualityPanel
             issues={validationIssues}
             isLoading={Boolean(uploadingCategory)}
           />
+          <RecentActivity activity={activity} />
         </>
       )}
     </section>
   );
+}
+
+function RecentActivity({ activity }: { activity: MonthlyCloseActivity[] }) {
+  return (
+    <section className="rounded-md border border-neutral-200 bg-white">
+      <div className="border-b border-neutral-200 px-5 py-4">
+        <h2 className="text-base font-semibold">Recent Activity</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          Data Room actions for the selected reporting month.
+        </p>
+      </div>
+      <div className="p-5">
+        {activity.length === 0 ? (
+          <p className="text-sm text-neutral-500">
+            No Data Room activity has been recorded for this month yet.
+          </p>
+        ) : (
+          <div className="divide-y divide-neutral-100">
+            {activity.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <p className="font-medium text-neutral-950">
+                    {formatAction(item.action)}
+                  </p>
+                  <p className="mt-1 text-neutral-500">
+                    {String(item.details?.file_name ?? item.file_category)}
+                  </p>
+                </div>
+                <p className="text-neutral-500">{formatActivityDate(item.created_at)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function formatAction(action: string) {
+  const labels: Record<string, string> = {
+    uploaded_file: "Uploaded file",
+    replaced_file: "Replaced file",
+    removed_file: "Removed file",
+    marked_needs_review: "Marked needs review",
+    approved_file: "Approved file",
+  };
+
+  return labels[action] ?? action;
+}
+
+function formatActivityDate(value: string | null) {
+  if (!value) {
+    return "Date unavailable";
+  }
+
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
 }

@@ -31,10 +31,29 @@ export function DataQualityPanel({
             {issues.map((issue) => (
               <div
                 key={issue.id}
-                className="flex flex-col gap-2 rounded-md border border-neutral-200 bg-white p-4 sm:flex-row sm:items-start sm:justify-between"
+                className="rounded-md border border-neutral-200 bg-white p-4"
               >
-                <p className="text-sm leading-6 text-neutral-700">{issue.message}</p>
-                <SeverityBadge severity={issue.severity} />
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                      {issue.categoryLabel}
+                    </p>
+                    <p className="mt-2 text-sm font-medium text-neutral-950">
+                      {issue.message}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600">
+                      Suggested fix: {issue.suggestedFix}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {typeof issue.rowCount === "number" ? (
+                      <span className="inline-flex h-7 items-center rounded-md border border-neutral-200 bg-white px-2 text-xs font-medium text-neutral-700">
+                        {issue.rowCount} row{issue.rowCount === 1 ? "" : "s"}
+                      </span>
+                    ) : null}
+                    <SeverityBadge severity={issue.severity} />
+                  </div>
+                </div>
               </div>
             ))}
           </div>

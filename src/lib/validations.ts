@@ -11,8 +11,11 @@ export type ValidationSeverity = "Info" | "Warning" | "Critical";
 export type DataQualityIssue = {
   id: string;
   fileCategory: MonthlyCloseCategory;
+  categoryLabel: string;
   severity: ValidationSeverity;
   message: string;
+  rowCount?: number;
+  suggestedFix: string;
 };
 
 export type ValidationSummary = {
@@ -52,10 +55,12 @@ export function buildValidationSummary({
     issues.push({
       id: `${fileCategory}-parse-${index}`,
       fileCategory,
+      categoryLabel: categoryLabel(fileCategory),
       severity: message.toLowerCase().includes("missing required column")
         ? "Critical"
         : "Warning",
-      message: `${categoryLabel(fileCategory)}: ${message}`,
+      message,
+      suggestedFix: suggestedFixFor(message),
     });
   });
 
@@ -72,8 +77,11 @@ export function buildValidationSummary({
     issues.push({
       id: `${fileCategory}-row-${index}`,
       fileCategory,
+      categoryLabel: categoryLabel(fileCategory),
       severity,
-      message: `${categoryLabel(fileCategory)}: ${formatRowIssue(message, count)}.`,
+      message: `${formatRowIssue(message, count)}.`,
+      rowCount: count,
+      suggestedFix: suggestedFixFor(message),
     });
   });
 
@@ -83,10 +91,12 @@ export function buildValidationSummary({
     issues.push({
       id: `${fileCategory}-month-mismatch`,
       fileCategory,
+      categoryLabel: categoryLabel(fileCategory),
       severity: "Critical",
-      message: `${categoryLabel(
-        fileCategory,
-      )}: ${monthMismatchCount} row(s) do not match the selected reporting month.`,
+      message: `${monthMismatchCount} row(s) do not match the selected reporting month.`,
+      rowCount: monthMismatchCount,
+      suggestedFix:
+        "Update the month values to match the selected reporting period before approving.",
     });
   }
 
@@ -126,10 +136,11 @@ export function buildRawFileValidationSummary(
       {
         id: `${fileCategory}-raw-file`,
         fileCategory,
+        categoryLabel: categoryLabel(fileCategory),
         severity: "Info",
-        message: `${categoryLabel(
-          fileCategory,
-        )}: File saved for monthly close review. Automated row parsing is not enabled for this category yet.`,
+        message:
+          "File saved for monthly close review. Automated row parsing is not enabled for this category yet.",
+        suggestedFix: "Review the file manually before approving.",
       },
     ],
   };
@@ -179,10 +190,13 @@ function buildActualsVarianceIssues(
     {
       id: `${fileCategory}-payroll-variance`,
       fileCategory,
+      categoryLabel: categoryLabel(fileCategory),
       severity: "Warning" as const,
-      message: `${categoryLabel(fileCategory)}: Payroll expense ${
+      message: `Payroll expense ${
         change > 0 ? "increased" : "decreased"
       } ${Math.round(Math.abs(change) * 100)}% vs prior month.`,
+      suggestedFix:
+        "Confirm payroll changes are expected, or replace the actuals file with corrected rows.",
     },
   ];
 }
@@ -229,6 +243,44 @@ function formatRowIssue(message: string, count: number) {
   }
 
   return `${count} row(s): ${message}`;
+}
+
+function suggestedFixFor(message: string) {
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("missing required column")) {
+    return "Add the required column to the CSV and replace the file.";
+  }
+
+  if (normalized.includes("missing account")) {
+    return "Add account names before approving the file.";
+  }
+
+  if (normalized.includes("negative revenue") || normalized.includes("unexpected negative revenue")) {
+    return "Review revenue signs and correct negative revenue unless it is an intentional adjustment.";
+  }
+
+  if (normalized.includes("duplicate")) {
+    return "Remove duplicate rows or confirm the duplicate entries are intentional.";
+  }
+
+  if (normalized.includes("missing month")) {
+    return "Add month values using YYYY-MM format.";
+  }
+
+  if (normalized.includes("invalid date") || normalized.includes("invalid month")) {
+    return "Use valid dates and month values before approving.";
+  }
+
+  if (normalized.includes("non-numeric")) {
+    return "Replace non-numeric values with valid numbers.";
+  }
+
+  if (normalized.includes("large month-over-month")) {
+    return "Confirm the variance is expected or correct the source file.";
+  }
+
+  return "Review the affected rows and replace the file if corrections are needed.";
 }
 
 function isPayroll(account: string | null, category: string | null) {
