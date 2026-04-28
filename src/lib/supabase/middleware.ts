@@ -5,6 +5,7 @@ const protectedRoutes = [
   "/dashboard",
   "/budget-vs-actuals",
   "/company-profile",
+  "/data-room",
   "/decision-center",
   "/forecasts",
   "/mapping",
