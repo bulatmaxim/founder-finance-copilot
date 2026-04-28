@@ -37,6 +37,8 @@ import {
   type ActiveFinancialData,
 } from "@/lib/localDataStore";
 import { generateMonthlyCfoDeck } from "@/lib/powerpoint";
+import { hasSupabaseBrowserEnv } from "@/lib/supabase/client";
+import { saveGeneratedReportToSupabase } from "@/lib/supabase/data";
 
 type Highlight = {
   label: string;
@@ -93,10 +95,28 @@ export function CFOBrief() {
     try {
       const deckBrief =
         aiBriefToBriefContent(getLatestAIBrief()) ?? buildBriefForMonth(deckMonth);
-      const fileName = await generateMonthlyCfoDeck({
+      const { fileName, blob } = await generateMonthlyCfoDeck({
         reportingMonth: deckMonth,
         brief: deckBrief,
       });
+      if (hasSupabaseBrowserEnv()) {
+        try {
+          await saveGeneratedReportToSupabase({
+            reportType: "monthly_cfo_deck",
+            period: deckMonth,
+            title: "Monthly CFO Deck",
+            fileName,
+            file: blob,
+          });
+          setDeckMessage(
+            `${fileName} was generated, downloaded, and saved to Supabase.`,
+          );
+          return;
+        } catch (saveError) {
+          console.error("Monthly CFO Deck Supabase save failed", saveError);
+        }
+      }
+
       setDeckMessage(`${fileName} was generated and sent to your browser downloads.`);
     } catch (error) {
       console.error("Monthly CFO Deck generation failed", error);
@@ -132,9 +152,8 @@ export function CFOBrief() {
             activeBudget.dataSource === "uploaded" ||
             activeCash.dataSource === "uploaded" ? (
               <p className="text-sm text-neutral-500">
-                Uploaded actuals, budget, and cash data are stored locally in your
-                browser for prototype testing only. They are not saved to a database
-                yet.
+                Uploaded actuals, budget, and cash data are stored locally and
+                saved to Supabase when the workspace is configured.
               </p>
             ) : null}
           </div>

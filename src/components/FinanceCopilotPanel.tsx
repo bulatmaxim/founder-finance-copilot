@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { InsightCard } from "@/components/InsightCard";
 import { Toast, type ToastMessage } from "@/components/Toast";
 import {
@@ -15,7 +15,10 @@ import {
   type AICfoBrief,
 } from "@/lib/localDataStore";
 import { hasSupabaseBrowserEnv } from "@/lib/supabase/client";
-import { saveAIBriefToSupabase } from "@/lib/supabase/data";
+import {
+  getAIBriefHistory,
+  saveAIBriefToSupabase,
+} from "@/lib/supabase/data";
 
 type FinanceCopilotPanelProps = {
   reportingMonth?: string;
@@ -31,6 +34,13 @@ const presetQuestions = [
   "What should we tell investors?",
   "What actions should management take?",
 ];
+
+type AIBriefHistoryRow = {
+  id: string;
+  period: string | null;
+  status: string | null;
+  created_at: string | null;
+};
 
 export function FinanceCopilotPanel({
   reportingMonth,
@@ -50,6 +60,7 @@ export function FinanceCopilotPanel({
   );
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [selectedQuestion, setSelectedQuestion] = useState(presetQuestions[0]);
+  const [briefHistory, setBriefHistory] = useState<AIBriefHistoryRow[]>([]);
   const answer = useMemo(
     () =>
       aiBrief
@@ -75,6 +86,18 @@ export function FinanceCopilotPanel({
   const investorBullets = aiBrief?.investorUpdateBullets ?? insightResult.investorUpdateBullets;
   const forecastSummary =
     aiBrief?.forecastRecommendation ?? insightResult.forecastRecommendation.summary;
+
+  useEffect(() => {
+    async function loadBriefHistory() {
+      if (!hasSupabaseBrowserEnv()) {
+        return;
+      }
+
+      setBriefHistory(await getAIBriefHistory());
+    }
+
+    void loadBriefHistory();
+  }, []);
 
   async function handleGenerateAIBrief() {
     setIsGeneratingAiBrief(true);
@@ -110,6 +133,7 @@ export function FinanceCopilotPanel({
             sourceSummary: financeSummary,
             aiOutput: brief,
           });
+          setBriefHistory(await getAIBriefHistory());
         } catch (saveError) {
           console.error("AI CFO Brief Supabase save failed", saveError);
         }
@@ -210,6 +234,27 @@ export function FinanceCopilotPanel({
           </p>
         ) : null}
       </div>
+
+      {briefHistory.length > 0 ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5">
+          <h3 className="text-base font-semibold">Prior CFO Briefs</h3>
+          <div className="mt-4 divide-y divide-neutral-100">
+            {briefHistory.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+              >
+                <span className="font-medium text-neutral-950">
+                  {item.period || "Unlabeled period"}
+                </span>
+                <span className="text-neutral-500">
+                  {formatHistoryDate(item.created_at)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-md border border-neutral-200 bg-white p-5">
         <h3 className="text-base font-semibold">
@@ -346,6 +391,18 @@ export function FinanceCopilotPanel({
       ) : null}
     </section>
   );
+}
+
+function formatHistoryDate(value: string | null) {
+  if (!value) {
+    return "Date unavailable";
+  }
+
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
 }
 
 function answerQuestionFromAIBrief(question: string, brief: AICfoBrief) {

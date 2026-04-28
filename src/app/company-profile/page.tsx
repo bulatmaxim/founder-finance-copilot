@@ -13,6 +13,8 @@ type CompanyState = {
   employees: string;
   currency: string;
   fiscalYearStartMonth: string;
+  currentCashBalance: string;
+  monthlyBurn: string;
 };
 
 const fallbackCompany: CompanyState = {
@@ -23,6 +25,8 @@ const fallbackCompany: CompanyState = {
   employees: sampleCompany.employees.toString(),
   currency: sampleCompany.currency,
   fiscalYearStartMonth: "1",
+  currentCashBalance: "",
+  monthlyBurn: "",
 };
 
 export default function CompanyProfilePage() {
@@ -65,6 +69,8 @@ export default function CompanyProfilePage() {
           employees: data.employees?.toString() ?? "",
           currency: data.currency ?? "USD",
           fiscalYearStartMonth: data.fiscal_year_start_month?.toString() ?? "1",
+          currentCashBalance: data.current_cash_balance?.toString() ?? "",
+          monthlyBurn: data.monthly_burn?.toString() ?? "",
         });
       }
     }
@@ -98,6 +104,8 @@ export default function CompanyProfilePage() {
           employees: Number(company.employees) || null,
           currency: company.currency,
           fiscal_year_start_month: Number(company.fiscalYearStartMonth) || 1,
+          current_cash_balance: numberOrNull(company.currentCashBalance),
+          monthly_burn: numberOrNull(company.monthlyBurn),
           updated_at: new Date().toISOString(),
         })
         .eq("id", company.id);
@@ -146,6 +154,8 @@ export default function CompanyProfilePage() {
           <Field label="Stage" value={company.stage} onChange={(value) => setCompany({ ...company, stage: value })} />
           <Field label="Employees" type="number" value={company.employees} onChange={(value) => setCompany({ ...company, employees: value })} />
           <Field label="Currency" value={company.currency} onChange={(value) => setCompany({ ...company, currency: value })} />
+          <Field label="Current cash balance" type="number" value={company.currentCashBalance} onChange={(value) => setCompany({ ...company, currentCashBalance: value })} />
+          <Field label="Monthly burn" type="number" value={company.monthlyBurn} onChange={(value) => setCompany({ ...company, monthlyBurn: value })} />
           <Field
             label="Fiscal year start month"
             type="number"
@@ -174,6 +184,12 @@ export default function CompanyProfilePage() {
       </section>
     </section>
   );
+}
+
+function numberOrNull(value: string) {
+  const parsed = Number(value);
+
+  return value.trim() && Number.isFinite(parsed) ? parsed : null;
 }
 
 function Field({

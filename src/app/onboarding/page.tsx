@@ -14,6 +14,8 @@ export default function OnboardingPage() {
   const [employees, setEmployees] = useState(sampleCompany.employees.toString());
   const [currency, setCurrency] = useState(sampleCompany.currency);
   const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState("1");
+  const [currentCashBalance, setCurrentCashBalance] = useState("");
+  const [monthlyBurn, setMonthlyBurn] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -86,6 +88,8 @@ export default function OnboardingPage() {
         employees: Number(employees) || null,
         currency,
         fiscal_year_start_month: Number(fiscalYearStartMonth) || 1,
+        current_cash_balance: numberOrNull(currentCashBalance),
+        monthly_burn: numberOrNull(monthlyBurn),
       });
 
       if (error) {
@@ -158,6 +162,18 @@ export default function OnboardingPage() {
             min="1"
             max="12"
           />
+          <Field
+            label="Current cash balance"
+            value={currentCashBalance}
+            onChange={setCurrentCashBalance}
+            type="number"
+          />
+          <Field
+            label="Monthly burn"
+            value={monthlyBurn}
+            onChange={setMonthlyBurn}
+            type="number"
+          />
         </div>
         <button
           type="submit"
@@ -169,6 +185,12 @@ export default function OnboardingPage() {
       </form>
     </section>
   );
+}
+
+function numberOrNull(value: string) {
+  const parsed = Number(value);
+
+  return value.trim() && Number.isFinite(parsed) ? parsed : null;
 }
 
 function Field({

@@ -47,6 +47,8 @@ export type SupabaseCompany = {
   employees: number | null;
   currency: string | null;
   fiscal_year_start_month: number | null;
+  current_cash_balance: number | null;
+  monthly_burn: number | null;
 };
 
 function ensureSupabase() {
@@ -90,11 +92,11 @@ export async function getCurrentCompany() {
 }
 
 export async function getFinancialRows() {
-  return getFinancialRowsByType("actuals");
+  return getRows("financial_actuals", "month");
 }
 
 export async function getBudgetRows() {
-  return getFinancialRowsByType("budget");
+  return getRows("budget_rows", "month");
 }
 
 export async function getForecastRows() {
@@ -126,7 +128,7 @@ async function getFinancialRowsByType(dataType: string) {
 }
 
 export async function getCashBalances() {
-  return getRows("cash_balances", "month");
+  return getRows("cash_rows", "month");
 }
 
 export async function getPayrollRows() {
@@ -146,7 +148,7 @@ export async function getBankTransactions() {
 }
 
 export async function getReports() {
-  return getRows("reports", "created_at", false);
+  return getRows("generated_reports", "created_at", false);
 }
 
 export async function getLatestAIBrief() {
@@ -171,6 +173,29 @@ export async function getLatestAIBrief() {
   }
 
   return data;
+}
+
+export async function getAIBriefHistory(limit = 6) {
+  const { company } = await getCurrentCompany();
+
+  if (!company) {
+    return [];
+  }
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("ai_briefs")
+    .select("id, period, status, created_at")
+    .eq("company_id", company.id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("Failed to load AI brief history", error);
+    return [];
+  }
+
+  return data ?? [];
 }
 
 async function getRows(table: string, orderBy: string, ascending = true) {
@@ -298,7 +323,25 @@ export async function clearSupabaseData(dataType: UploadDataType) {
     }
   }
 
-  if (dataType === "actuals" || dataType === "budget" || dataType === "forecast") {
+  if (dataType === "actuals") {
+    const { error } = await supabase
+      .from("financial_actuals")
+      .delete()
+      .eq("company_id", company.id);
+
+    if (error) {
+      throw new Error(`${dataType} rows clear failed: ${error.message}`);
+    }
+  } else if (dataType === "budget") {
+    const { error } = await supabase
+      .from("budget_rows")
+      .delete()
+      .eq("company_id", company.id);
+
+    if (error) {
+      throw new Error(`${dataType} rows clear failed: ${error.message}`);
+    }
+  } else if (dataType === "forecast") {
     const { error } = await supabase
       .from("financial_rows")
       .delete()
@@ -310,7 +353,7 @@ export async function clearSupabaseData(dataType: UploadDataType) {
     }
   } else {
     const tableByType: Record<Exclude<UploadDataType, "actuals" | "budget" | "forecast">, string> = {
-      cash: "cash_balances",
+      cash: "cash_rows",
       payroll: "payroll_rows",
       revenueDetail: "revenue_detail_rows",
       pipeline: "pipeline_rows",
@@ -355,15 +398,22 @@ async function insertParsedRows({
       .map((row) => ({
         company_id: companyId,
         uploaded_file_id: uploadedFileId,
-        data_type: dataType,
         month: row.month,
         account: row.account,
         category: row.category,
         amount: row.amount,
-        forecast_version: "forecastVersion" in row ? row.forecastVersion : null,
+        ...("forecastVersion" in row
+          ? { data_type: dataType, forecast_version: row.forecastVersion }
+          : {}),
       }));
 
-    await insertRows("financial_rows", financialRows);
+    const tableByType: Record<"actuals" | "budget" | "forecast", string> = {
+      actuals: "financial_actuals",
+      budget: "budget_rows",
+      forecast: "financial_rows",
+    };
+
+    await insertRows(tableByType[dataType], financialRows);
     return;
   }
 
@@ -377,7 +427,7 @@ async function insertParsedRows({
         cash_balance: row.cashBalance,
       }));
 
-    await insertRows("cash_balances", cashRows);
+    await insertRows("cash_rows", cashRows);
     return;
   }
 
@@ -519,4 +569,66 @@ export async function saveAIBriefToSupabase({
   if (error) {
     throw new Error(`AI brief save failed: ${error.message}`);
   }
+}
+
+export async function saveGeneratedReportToSupabase({
+  reportType,
+  period,
+  title,
+  fileName,
+  file,
+}: {
+  reportType: string;
+  period: string;
+  title: string;
+  fileName: string;
+  file: Blob | null;
+}) {
+  const supabase = ensureSupabase();
+  const { user, company } = await getCurrentCompany();
+
+  if (!user || !company) {
+    return null;
+  }
+
+  let storagePath: string | null = null;
+
+  if (file) {
+    storagePath = `${user.id}/${company.id}/reports/${Date.now()}-${sanitizeFileName(
+      fileName,
+    )}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("finance-uploads")
+      .upload(storagePath, file, {
+        contentType:
+          file.type ||
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      throw new Error(`Report storage upload failed: ${uploadError.message}`);
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("generated_reports")
+    .insert({
+      company_id: company.id,
+      user_id: user.id,
+      report_type: reportType,
+      period,
+      title,
+      file_name: fileName,
+      storage_path: storagePath,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    throw new Error(`Report metadata save failed: ${error.message}`);
+  }
+
+  return data;
 }

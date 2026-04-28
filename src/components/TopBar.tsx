@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { sampleCompany } from "@/data/sampleCompany";
 import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
@@ -47,11 +48,19 @@ export function TopBar() {
             {companyName}
           </p>
         </div>
-        <div className="rounded-md border border-neutral-200 bg-white px-4 py-3 text-sm">
-          <p className="font-medium text-neutral-950">
-            Current Reporting Period: Latest Month
-          </p>
-          <p className="mt-1 text-neutral-500">Single-company workspace</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="rounded-md border border-neutral-200 bg-white px-4 py-3 text-sm">
+            <p className="font-medium text-neutral-950">
+              Current Reporting Period: Latest Month
+            </p>
+            <p className="mt-1 text-neutral-500">Single-company workspace</p>
+          </div>
+          <Link
+            href="/logout"
+            className="inline-flex h-10 items-center justify-center rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-50"
+          >
+            Log out
+          </Link>
         </div>
       </div>
     </header>

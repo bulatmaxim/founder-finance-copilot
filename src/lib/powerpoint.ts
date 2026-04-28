@@ -105,9 +105,10 @@ export async function generateMonthlyCfoDeck({
 
   const fileName = `Acme_AI_Monthly_CFO_Deck_${sanitizeReportingMonth(context.reportingMonth)}.pptx`;
   const content = await pptx.write({ outputType: "blob" });
-  downloadBlob(toPptxBlob(content), fileName);
+  const blob = toPptxBlob(content);
+  downloadBlob(blob, fileName);
 
-  return fileName;
+  return { fileName, blob };
 }
 
 function assertBrowserRuntime() {
@@ -540,11 +541,11 @@ function addAppendixSlide(
       ...(context.activeData.dataSource === "uploaded" ||
       context.activeBudget.dataSource === "uploaded" ||
       context.activeCash.dataSource === "uploaded"
-        ? ["Uploaded actuals, budget, and cash CSV data are stored locally in the browser for prototype testing only."]
+        ? ["Uploaded actuals, budget, and cash CSV data are restored from Supabase when configured."]
         : []),
       ...context.uploadedDataNotes,
       "Favorable variance logic: higher is favorable for revenue, margin, EBITDA, cash, and runway; lower is favorable for expenses and net burn.",
-      "No external accounting, banking, payroll, CRM, AI, or database service is connected.",
+      "No external accounting, banking, payroll, or CRM service is connected.",
     ],
     0.95,
     1.4,

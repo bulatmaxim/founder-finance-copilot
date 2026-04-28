@@ -238,9 +238,8 @@ export function DashboardPageContent() {
           activeBudget.dataSource === "uploaded" ||
           activeCash.dataSource === "uploaded" ? (
             <p className="text-sm text-neutral-500">
-              Uploaded actuals, budget, and cash data are stored locally in your
-              browser for prototype testing only. They are not saved to a database
-              yet.
+              Uploaded actuals, budget, and cash data are restored from Supabase
+              when configured, with a local browser fallback for development.
             </p>
           ) : null}
         </div>
