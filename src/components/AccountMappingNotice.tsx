@@ -36,7 +36,12 @@ export function AccountMappingNotice() {
     };
   }, []);
 
-  if (!summary || (summary.unmappedAccounts === 0 && summary.needsReview === 0)) {
+  if (
+    !summary ||
+    (summary.unmappedAccounts === 0 &&
+      summary.suggestedAccounts === 0 &&
+      summary.needsReview === 0)
+  ) {
     return null;
   }
 
@@ -49,6 +54,13 @@ export function AccountMappingNotice() {
             <>
               {summary.unmappedAccounts} account
               {summary.unmappedAccounts === 1 ? " is" : "s are"} unmapped.
+            </>
+          ) : null}{" "}
+          {summary.suggestedAccounts > 0 ? (
+            <>
+              {summary.suggestedAccounts} account
+              {summary.suggestedAccounts === 1 ? " has" : "s have"} suggested
+              mappings pending save.
             </>
           ) : null}{" "}
           {summary.needsReview > 0 ? (

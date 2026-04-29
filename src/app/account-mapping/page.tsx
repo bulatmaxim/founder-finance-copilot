@@ -12,11 +12,12 @@ import {
   type AccountMappingRow,
   type AccountMappingStatus,
 } from "@/lib/accountMapping";
+import { formatCurrency } from "@/lib/formatting";
 import { hydrateLocalDataFromSupabase } from "@/lib/supabase/hydrateLocalData";
 
-type Filter = "All" | "Unmapped" | "Mapped" | "Needs Review";
+type Filter = "All" | "Unmapped" | "Suggested" | "Mapped" | "Needs Review" | "Ignored";
 
-const filters: Filter[] = ["All", "Unmapped", "Mapped", "Needs Review"];
+const filters: Filter[] = ["All", "Unmapped", "Suggested", "Mapped", "Needs Review", "Ignored"];
 
 export default function AccountMappingPage() {
   const [rows, setRows] = useState<AccountMappingRow[]>([]);
@@ -86,10 +87,20 @@ export default function AccountMappingPage() {
     try {
       await saveAccountMapping({
         rawAccountName: row.rawAccountName,
-        normalizedCategory: row.selectedCategory || row.suggestedCategory,
+        normalizedCategory:
+          row.status === "Ignored"
+            ? "Uncategorized"
+            : row.selectedCategory || row.suggestedCategory,
         department: row.department,
         statementType: row.sourceType,
-        status: row.selectedCategory || row.suggestedCategory ? row.status === "Needs review" ? "Needs review" : "Mapped" : "Unmapped",
+        status:
+          row.status === "Ignored"
+            ? "Ignored"
+            : row.selectedCategory || row.suggestedCategory
+              ? row.status === "Needs review"
+                ? "Needs review"
+                : "Mapped"
+              : "Unmapped",
       });
       await hydrateLocalDataFromSupabase();
       await loadRows();
@@ -147,10 +158,16 @@ export default function AccountMappingPage() {
       for (const row of rows.filter((item) => item.selectedCategory)) {
         await saveAccountMapping({
           rawAccountName: row.rawAccountName,
-          normalizedCategory: row.selectedCategory,
+          normalizedCategory:
+            row.status === "Ignored" ? "Uncategorized" : row.selectedCategory,
           department: row.department,
           statementType: row.sourceType,
-          status: row.status === "Needs review" ? "Needs review" : "Mapped",
+          status:
+            row.status === "Ignored"
+              ? "Ignored"
+              : row.status === "Needs review"
+                ? "Needs review"
+                : "Mapped",
         });
       }
 
@@ -206,12 +223,44 @@ export default function AccountMappingPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <SummaryCard label="Total accounts" value={summary.totalAccounts} />
         <SummaryCard label="Mapped accounts" value={summary.mappedAccounts} />
+        <SummaryCard label="Suggested" value={summary.suggestedAccounts} />
         <SummaryCard label="Unmapped accounts" value={summary.unmappedAccounts} />
+        <SummaryCard label="Ignored" value={summary.ignoredAccounts} />
         <SummaryCard label="Needs review" value={summary.needsReview} />
       </div>
+
+      <section className="premium-card rounded-2xl p-5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-[color:var(--text-strong)]">
+              Mapping Completeness
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-[color:var(--text-muted)]">
+              Mapping required before this data can be fully used in reporting.
+              Suggested mappings still need to be saved.
+            </p>
+          </div>
+          <div className="min-w-56">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium text-[color:var(--text-soft)]">
+                Completion
+              </span>
+              <span className="font-semibold text-[color:var(--text-strong)]">
+                {summary.completionPercent}%
+              </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[color:var(--surface-3)]">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-sky-300 to-cyan-500"
+                style={{ width: `${summary.completionPercent}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-md border border-neutral-200 bg-white p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -306,11 +355,15 @@ function MappingTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1180px] text-left text-sm">
+        <table className="w-full min-w-[1560px] text-left text-sm">
           <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-600">
             <tr>
               <th className="px-4 py-3 font-medium">Raw account name</th>
-              <th className="px-4 py-3 font-medium">Source type</th>
+              <th className="px-4 py-3 font-medium">Source</th>
+              <th className="px-4 py-3 font-medium">First seen</th>
+              <th className="px-4 py-3 font-medium">Latest seen</th>
+              <th className="px-4 py-3 font-medium">Rows</th>
+              <th className="px-4 py-3 font-medium">Total amount</th>
               <th className="px-4 py-3 font-medium">Suggested FP&A category</th>
               <th className="px-4 py-3 font-medium">Selected FP&A category</th>
               <th className="px-4 py-3 font-medium">Department</th>
@@ -326,6 +379,16 @@ function MappingTable({
                   {row.rawAccountName}
                 </td>
                 <td className="px-4 py-4 text-neutral-700">{row.sourceType}</td>
+                <td className="px-4 py-4 text-neutral-600">
+                  {formatDate(row.firstSeenDate)}
+                </td>
+                <td className="px-4 py-4 text-neutral-600">
+                  {formatDate(row.latestSeenDate)}
+                </td>
+                <td className="px-4 py-4 text-neutral-700">{row.rowCount}</td>
+                <td className="px-4 py-4 text-neutral-700">
+                  {formatCurrency(row.totalAmount)}
+                </td>
                 <td className="px-4 py-4 text-neutral-700">
                   {row.suggestedCategory}
                 </td>
@@ -378,8 +441,10 @@ function MappingTable({
                     className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none focus:border-neutral-950"
                   >
                     <option value="Unmapped">Unmapped</option>
+                    <option value="Suggested">Suggested</option>
                     <option value="Mapped">Mapped</option>
                     <option value="Needs review">Needs review</option>
+                    <option value="Ignored">Ignored</option>
                   </select>
                 </td>
                 <td className="px-4 py-4 text-neutral-600">

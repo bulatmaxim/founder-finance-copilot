@@ -92,11 +92,11 @@ export function buildValidationSummary({
       id: `${fileCategory}-month-mismatch`,
       fileCategory,
       categoryLabel: categoryLabel(fileCategory),
-      severity: "Critical",
-      message: `${monthMismatchCount} row(s) do not match the selected reporting month.`,
+      severity: "Info",
+      message: `${monthMismatchCount} row(s) do not match the selected reporting month. Staged rows preserve their actual periods.`,
       rowCount: monthMismatchCount,
       suggestedFix:
-        "Update the month values to match the selected reporting period before approving.",
+        "Confirm the multi-period upload is intentional, or replace the file with the expected reporting month only.",
     });
   }
 

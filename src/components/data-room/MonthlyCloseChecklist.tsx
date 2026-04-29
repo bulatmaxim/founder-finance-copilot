@@ -5,6 +5,7 @@ import {
   type MonthlyCloseItem,
   type MonthlyCloseStatus,
 } from "@/lib/monthlyClose";
+import Link from "next/link";
 
 type MonthlyCloseChecklistProps = {
   items: MonthlyCloseItem[];
@@ -49,7 +50,7 @@ export function MonthlyCloseChecklist({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1120px] text-left text-sm">
+          <table className="w-full min-w-[1480px] text-left text-sm">
             <thead className="border-b border-white/10 text-slate-400">
               <tr>
                 <th className="px-4 py-3 font-medium">File category</th>
@@ -57,6 +58,9 @@ export function MonthlyCloseChecklist({
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">File name</th>
                 <th className="px-4 py-3 font-medium">Last uploaded</th>
+                <th className="px-4 py-3 font-medium">Detected periods</th>
+                <th className="px-4 py-3 font-medium">Rows staged</th>
+                <th className="px-4 py-3 font-medium">Mapping</th>
                 <th className="px-4 py-3 font-medium">Validation</th>
                 <th className="px-4 py-3 font-medium">Actions</th>
               </tr>
@@ -98,6 +102,19 @@ export function MonthlyCloseChecklist({
                     </td>
                     <td className="px-4 py-4 text-slate-400">
                       {formatDateTime(item.uploaded_at)}
+                    </td>
+                    <td className="px-4 py-4 text-slate-400">
+                      <PeriodRange item={item} />
+                    </td>
+                    <td className="px-4 py-4 text-slate-300">
+                      {item.import_batch
+                        ? item.import_batch.detected_row_count.toLocaleString()
+                        : hasUploadedFile
+                          ? "Not staged"
+                          : "-"}
+                    </td>
+                    <td className="px-4 py-4">
+                      <MappingBadge item={item} />
                     </td>
                     <td className="px-4 py-4">
                       <ValidationBadge item={item} />
@@ -152,6 +169,14 @@ export function MonthlyCloseChecklist({
                             Remove file
                           </button>
                         ) : null}
+                        {hasUploadedFile ? (
+                          <Link
+                            href="/account-mapping"
+                            className="inline-flex h-9 items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10"
+                          >
+                            Review Mapping
+                          </Link>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -169,7 +194,7 @@ function StatusBadge({ status }: { status: MonthlyCloseStatus }) {
   const className =
     status === "Approved"
       ? "premium-success"
-      : status === "Needs review"
+      : status === "Needs review" || status === "Needs Mapping"
         ? "premium-warning"
         : "premium-pill";
 
@@ -178,6 +203,55 @@ function StatusBadge({ status }: { status: MonthlyCloseStatus }) {
       className={`inline-flex h-7 items-center rounded-xl border px-2 text-xs font-medium ${className}`}
     >
       {status}
+    </span>
+  );
+}
+
+function PeriodRange({ item }: { item: MonthlyCloseItem }) {
+  const start = item.import_batch?.detected_period_start;
+  const end = item.import_batch?.detected_period_end;
+
+  if (!start || !end) {
+    return item.uploaded_file_id ? "Not detected" : "-";
+  }
+
+  const label =
+    start === end ? formatMonth(start) : `${formatMonth(start)} - ${formatMonth(end)}`;
+
+  return (
+    <div>
+      <p>{label}</p>
+      {start !== end ? (
+        <p className="mt-1 text-xs text-[color:var(--text-muted)]">
+          Multi-period file detected
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function MappingBadge({ item }: { item: MonthlyCloseItem }) {
+  const batch = item.import_batch;
+
+  if (!batch) {
+    return (
+      <span className="premium-pill inline-flex h-7 items-center rounded-xl px-2 text-xs font-medium">
+        Not staged
+      </span>
+    );
+  }
+
+  if (batch.unmapped_row_count > 0) {
+    return (
+      <span className="premium-warning inline-flex h-7 items-center rounded-xl border px-2 text-xs font-medium">
+        {batch.mapped_row_count} mapped / {batch.unmapped_row_count} unmapped
+      </span>
+    );
+  }
+
+  return (
+    <span className="premium-success inline-flex h-7 items-center rounded-xl border px-2 text-xs font-medium">
+      Mapping complete
     </span>
   );
 }
@@ -219,4 +293,12 @@ function formatDateTime(value: string | null) {
         day: "numeric",
         year: "numeric",
       });
+}
+
+function formatMonth(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }

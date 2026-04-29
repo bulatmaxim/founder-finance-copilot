@@ -3,8 +3,13 @@
 import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
 import { getCurrentCompany } from "@/lib/supabase/data";
 
-export type AccountMappingStatus = "Unmapped" | "Mapped" | "Needs review";
-export type AccountSourceType = "Actuals" | "Budget" | "Actuals, Budget";
+export type AccountMappingStatus =
+  | "Unmapped"
+  | "Suggested"
+  | "Mapped"
+  | "Needs review"
+  | "Ignored";
+export type AccountSourceType = string;
 
 export type AccountMappingRow = {
   id: string | null;
@@ -16,13 +21,21 @@ export type AccountMappingRow = {
   department: string;
   status: AccountMappingStatus;
   lastUpdated: string | null;
+  firstSeenDate: string | null;
+  latestSeenDate: string | null;
+  totalAmount: number;
+  rowCount: number;
+  sourceFiles: string[];
 };
 
 export type AccountMappingSummary = {
   totalAccounts: number;
   mappedAccounts: number;
+  suggestedAccounts: number;
   unmappedAccounts: number;
+  ignoredAccounts: number;
   needsReview: number;
+  completionPercent: number;
 };
 
 export const standardFpnaCategories = [
@@ -84,9 +97,10 @@ export async function loadAccountMappingRows() {
     throw new Error("Please complete your company profile before mapping accounts.");
   }
 
-  const [actuals, budget, mappings] = await Promise.all([
-    loadDistinctAccounts("financial_actuals"),
-    loadDistinctAccounts("budget_rows"),
+  const [actuals, budget, stagedAccounts, mappings] = await Promise.all([
+    loadAccountFacts("financial_actuals", "Actuals"),
+    loadAccountFacts("budget_rows", "Budget"),
+    loadStagedAccountFacts(),
     loadMappings(),
   ]);
   const mappingByName = new Map(
@@ -95,38 +109,43 @@ export async function loadAccountMappingRows() {
       mapping,
     ]),
   );
-  const accountSources = new Map<string, Set<"Actuals" | "Budget">>();
-  const displayNames = new Map<string, string>();
+  const accountFacts = new Map<string, AccountAggregate>();
 
   actuals.forEach((account) => {
-    const key = normalizeAccountName(account);
-    displayNames.set(key, account);
-    accountSources.set(key, accountSources.get(key) ?? new Set());
-    accountSources.get(key)?.add("Actuals");
+    mergeAccountFact(accountFacts, account);
   });
   budget.forEach((account) => {
-    const key = normalizeAccountName(account);
-    displayNames.set(key, displayNames.get(key) ?? account);
-    accountSources.set(key, accountSources.get(key) ?? new Set());
-    accountSources.get(key)?.add("Budget");
+    mergeAccountFact(accountFacts, account);
+  });
+  stagedAccounts.forEach((account) => {
+    mergeAccountFact(accountFacts, account);
   });
 
-  return [...accountSources.entries()]
-    .map(([key, sources]) => {
-      const rawAccountName = displayNames.get(key) ?? key;
+  return [...accountFacts.entries()]
+    .map(([key, fact]) => {
+      const rawAccountName = fact.rawAccountName;
       const existing = mappingByName.get(key);
       const suggestion = suggestAccountMapping(rawAccountName);
+      const selectedCategory = existing?.normalized_category ?? "";
+      const status =
+        existing?.status ??
+        (suggestion.category === "Uncategorized" ? "Unmapped" : "Suggested");
 
       return {
         id: existing?.id ?? null,
         rawAccountName,
-        sourceType: formatSourceType(sources),
+        sourceType: formatSourceType(fact.sources),
         suggestedCategory: suggestion.category,
-        selectedCategory: existing?.normalized_category ?? "",
+        selectedCategory,
         suggestedDepartment: suggestion.department,
         department: existing?.department ?? suggestion.department,
-        status: existing?.status ?? "Unmapped",
+        status,
         lastUpdated: existing?.updated_at ?? null,
+        firstSeenDate: fact.firstSeenDate,
+        latestSeenDate: fact.latestSeenDate,
+        totalAmount: fact.totalAmount,
+        rowCount: fact.rowCount,
+        sourceFiles: [...fact.sourceFiles],
       } satisfies AccountMappingRow;
     })
     .sort((first, second) => first.rawAccountName.localeCompare(second.rawAccountName));
@@ -178,7 +197,9 @@ export async function saveAccountMapping({
 }
 
 export async function applySuggestedAccountMappings(rows: AccountMappingRow[]) {
-  const rowsToSave = rows.filter((row) => row.status !== "Mapped");
+  const rowsToSave = rows.filter(
+    (row) => row.status !== "Mapped" && row.status !== "Ignored",
+  );
 
   for (const row of rowsToSave) {
     await saveAccountMapping({
@@ -214,11 +235,19 @@ export async function loadAccountMappingSummary(): Promise<AccountMappingSummary
 }
 
 export function summarizeAccountMappings(rows: AccountMappingRow[]): AccountMappingSummary {
+  const mappedAccounts = rows.filter((row) => row.status === "Mapped").length;
+  const ignoredAccounts = rows.filter((row) => row.status === "Ignored").length;
+  const completeAccounts = mappedAccounts + ignoredAccounts;
+
   return {
     totalAccounts: rows.length,
-    mappedAccounts: rows.filter((row) => row.status === "Mapped").length,
+    mappedAccounts,
+    suggestedAccounts: rows.filter((row) => row.status === "Suggested").length,
     unmappedAccounts: rows.filter((row) => row.status === "Unmapped").length,
+    ignoredAccounts,
     needsReview: rows.filter((row) => row.status === "Needs review").length,
+    completionPercent:
+      rows.length === 0 ? 100 : Math.round((completeAccounts / rows.length) * 100),
   };
 }
 
@@ -302,7 +331,30 @@ export function normalizeAccountName(value: string) {
   return value.trim().toLowerCase();
 }
 
-async function loadDistinctAccounts(table: "financial_actuals" | "budget_rows") {
+type AccountFact = {
+  rawAccountName: string;
+  sourceType: string;
+  firstSeenDate: string | null;
+  latestSeenDate: string | null;
+  totalAmount: number;
+  rowCount: number;
+  sourceFiles: string[];
+};
+
+type AccountAggregate = {
+  rawAccountName: string;
+  sources: Set<string>;
+  firstSeenDate: string | null;
+  latestSeenDate: string | null;
+  totalAmount: number;
+  rowCount: number;
+  sourceFiles: Set<string>;
+};
+
+async function loadAccountFacts(
+  table: "financial_actuals" | "budget_rows",
+  sourceType: string,
+) {
   const { company } = await getCurrentCompany();
 
   if (!company) {
@@ -312,7 +364,7 @@ async function loadDistinctAccounts(table: "financial_actuals" | "budget_rows") 
   const supabase = createClient();
   const { data, error } = await supabase
     .from(table)
-    .select("account")
+    .select("account, month, amount, uploaded_file_id")
     .eq("company_id", company.id)
     .not("account", "is", null);
 
@@ -320,13 +372,108 @@ async function loadDistinctAccounts(table: "financial_actuals" | "budget_rows") 
     throw new Error(`Failed to load ${table} accounts: ${error.message}`);
   }
 
-  return [
-    ...new Set(
-      (data ?? [])
-        .map((row) => String(row.account ?? "").trim())
-        .filter(Boolean),
-    ),
-  ];
+  const facts = new Map<string, AccountAggregate>();
+
+  (data ?? []).forEach((row) => {
+    const rawAccountName = String(row.account ?? "").trim();
+
+    if (!rawAccountName) {
+      return;
+    }
+
+    mergeAccountFact(facts, {
+      rawAccountName,
+      sourceType,
+      firstSeenDate: normalizeMonthDate(String(row.month ?? "")),
+      latestSeenDate: normalizeMonthDate(String(row.month ?? "")),
+      totalAmount: Number(row.amount ?? 0),
+      rowCount: 1,
+      sourceFiles: [String(row.uploaded_file_id ?? "")].filter(Boolean),
+    });
+  });
+
+  return [...facts.values()].map(aggregateToFact);
+}
+
+async function loadStagedAccountFacts() {
+  const { company } = await getCurrentCompany();
+
+  if (!company) {
+    return [];
+  }
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("import_staged_rows")
+    .select(
+      "raw_account_name, file_category, period, amount, uploaded_file_id, mapping_status",
+    )
+    .eq("company_id", company.id)
+    .not("raw_account_name", "is", null);
+
+  if (error) {
+    console.error("Failed to load staged import accounts", error);
+    return [];
+  }
+
+  const facts = new Map<string, AccountAggregate>();
+
+  (data ?? []).forEach((row) => {
+    const rawAccountName = String(row.raw_account_name ?? "").trim();
+
+    if (!rawAccountName || row.mapping_status === "Ignored") {
+      return;
+    }
+
+    mergeAccountFact(facts, {
+      rawAccountName,
+      sourceType: sourceTypeForCategory(String(row.file_category ?? "")),
+      firstSeenDate: normalizeMonthDate(String(row.period ?? "")),
+      latestSeenDate: normalizeMonthDate(String(row.period ?? "")),
+      totalAmount: Number(row.amount ?? 0),
+      rowCount: 1,
+      sourceFiles: [String(row.uploaded_file_id ?? "")].filter(Boolean),
+    });
+  });
+
+  return [...facts.values()].map(aggregateToFact);
+}
+
+function mergeAccountFact(facts: Map<string, AccountAggregate>, next: AccountFact) {
+  const key = normalizeAccountName(next.rawAccountName);
+  const existing = facts.get(key);
+
+  if (!existing) {
+    facts.set(key, {
+      rawAccountName: next.rawAccountName,
+      sources: new Set([next.sourceType]),
+      firstSeenDate: next.firstSeenDate,
+      latestSeenDate: next.latestSeenDate,
+      totalAmount: next.totalAmount,
+      rowCount: next.rowCount,
+      sourceFiles: new Set(next.sourceFiles),
+    });
+    return;
+  }
+
+  existing.sources.add(next.sourceType);
+  existing.firstSeenDate = minDate(existing.firstSeenDate, next.firstSeenDate);
+  existing.latestSeenDate = maxDate(existing.latestSeenDate, next.latestSeenDate);
+  existing.totalAmount += next.totalAmount;
+  existing.rowCount += next.rowCount;
+  next.sourceFiles.forEach((sourceFile) => existing.sourceFiles.add(sourceFile));
+}
+
+function aggregateToFact(aggregate: AccountAggregate): AccountFact {
+  return {
+    rawAccountName: aggregate.rawAccountName,
+    sourceType: formatSourceType(aggregate.sources),
+    firstSeenDate: aggregate.firstSeenDate,
+    latestSeenDate: aggregate.latestSeenDate,
+    totalAmount: aggregate.totalAmount,
+    rowCount: aggregate.rowCount,
+    sourceFiles: [...aggregate.sourceFiles],
+  };
 }
 
 async function loadMappings() {
@@ -350,17 +497,47 @@ async function loadMappings() {
   return (data ?? []) as AccountMappingRecord[];
 }
 
-function formatSourceType(sources: Set<"Actuals" | "Budget">): AccountSourceType {
-  const hasActuals = sources.has("Actuals");
-  const hasBudget = sources.has("Budget");
-
-  if (hasActuals && hasBudget) {
-    return "Actuals, Budget";
-  }
-
-  return hasActuals ? "Actuals" : "Budget";
+function formatSourceType(sources: Set<string>): AccountSourceType {
+  return [...sources].filter(Boolean).sort().join(", ") || "Uploaded";
 }
 
 function includesAny(value: string, patterns: string[]) {
   return patterns.some((pattern) => value.includes(pattern));
+}
+
+function normalizeMonthDate(value: string) {
+  if (!value) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  if (/^\d{4}-\d{2}$/.test(value)) {
+    return `${value}-01`;
+  }
+
+  return null;
+}
+
+function minDate(first: string | null, second: string | null) {
+  if (!first) return second;
+  if (!second) return first;
+  return first < second ? first : second;
+}
+
+function maxDate(first: string | null, second: string | null) {
+  if (!first) return second;
+  if (!second) return first;
+  return first > second ? first : second;
+}
+
+function sourceTypeForCategory(fileCategory: string) {
+  if (fileCategory === "actuals") return "Actuals";
+  if (fileCategory === "budget") return "Budget";
+  if (fileCategory === "cash") return "Cash";
+  if (fileCategory === "payroll") return "Payroll";
+  if (fileCategory === "revenue") return "Revenue";
+  return fileCategory || "Staged";
 }

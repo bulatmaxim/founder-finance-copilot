@@ -7,6 +7,12 @@ import {
   parsePnlActualsCsv,
   parseRevenueDetailCsv,
 } from "@/lib/csvParser";
+import {
+  createImportBatchForUpload,
+  loadImportBatchesForUploadedFiles,
+  mergeValidationSummaries,
+  type ImportBatchSummary,
+} from "@/lib/importStaging";
 import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
 import { getCurrentCompany } from "@/lib/supabase/data";
 import {
@@ -39,6 +45,7 @@ export type MonthlyCloseCategory =
 export type MonthlyCloseStatus =
   | "Not uploaded"
   | "Uploaded"
+  | "Needs Mapping"
   | "Needs review"
   | "Approved";
 
@@ -56,6 +63,7 @@ export type MonthlyCloseItem = {
   approved_at: string | null;
   approved_by: string | null;
   validation_summary: ValidationSummary | null;
+  import_batch?: ImportBatchSummary | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -185,7 +193,9 @@ export function reportingMonthKey(reportingMonth: string) {
 export function getOverallCloseStatus(items: MonthlyCloseItem[]) {
   const uploadedCount = items.filter((item) => item.status !== "Not uploaded").length;
   const approvedCount = items.filter((item) => item.status === "Approved").length;
-  const needsReview = items.some((item) => item.status === "Needs review");
+  const needsReview = items.some(
+    (item) => item.status === "Needs review" || item.status === "Needs Mapping",
+  );
 
   if (uploadedCount === 0) {
     return "Not Started";
@@ -317,7 +327,7 @@ export async function uploadMonthlyCloseFile({
     fileCategory === "actuals"
       ? await loadPriorActualRows(company.id, reportingMonth)
       : [];
-  const validationSummary = parsed
+  let validationSummary = parsed
     ? buildValidationSummary({
         fileCategory,
         reportingMonth: reportingMonthKey(reportingMonth),
@@ -325,7 +335,6 @@ export async function uploadMonthlyCloseFile({
         priorActualRows,
       })
     : buildRawFileValidationSummary(fileCategory);
-  const status = hasValidationIssue(validationSummary) ? "Needs review" : "Uploaded";
 
   await markExistingUploadsInactive(company.id, reportingMonth, fileCategory);
 
@@ -341,7 +350,7 @@ export async function uploadMonthlyCloseFile({
       reporting_month: reportingMonth,
       period_start: reportingMonthKey(reportingMonth),
       period_end: reportingMonthKey(reportingMonth),
-      status: status === "Needs review" ? "needs_review" : "loaded",
+      status: "staged",
       row_count: validationSummary.totalRows,
       error_count: validationSummary.errorRows,
       warning_count: validationSummary.warningRows,
@@ -353,6 +362,74 @@ export async function uploadMonthlyCloseFile({
 
   if (fileError || !uploadedFile) {
     throw new Error(`Upload metadata save failed: ${fileError?.message ?? "No file row returned."}`);
+  }
+
+  let importBatch: Awaited<ReturnType<typeof createImportBatchForUpload>> | null = null;
+
+  try {
+    importBatch = await createImportBatchForUpload({
+      userId: user.id,
+      companyId: company.id,
+      uploadedFileId: uploadedFile.id as string,
+      reportingMonth,
+      fileCategory,
+      csvText,
+    });
+    validationSummary = mergeValidationSummaries(
+      validationSummary,
+      importBatch.validationSummary,
+    );
+  } catch (stagingError) {
+    console.error("Import staging failed", stagingError);
+    validationSummary = {
+      ...validationSummary,
+      warningRows: validationSummary.warningRows + 1,
+      issues: [
+        ...validationSummary.issues,
+        {
+          id: `${fileCategory}-import-staging-failed`,
+          fileCategory,
+          categoryLabel: config.title,
+          severity: "Warning",
+          message: "Import staging could not be completed for this file.",
+          suggestedFix:
+            stagingError instanceof Error
+              ? stagingError.message
+              : "Check the import staging tables and try replacing the file.",
+        },
+      ],
+    };
+  }
+
+  const status = getUploadStatusFromValidation({
+    fileCategory,
+    validationSummary,
+    importBatch,
+  });
+
+  const { error: uploadedFileUpdateError } = await supabase
+    .from("uploaded_files")
+    .update({
+      period_start: importBatch?.detectedPeriodStart
+        ? importBatch.detectedPeriodStart.slice(0, 7)
+        : reportingMonthKey(reportingMonth),
+      period_end: importBatch?.detectedPeriodEnd
+        ? importBatch.detectedPeriodEnd.slice(0, 7)
+        : reportingMonthKey(reportingMonth),
+      status:
+        status === "Needs Mapping"
+          ? "needs_mapping"
+          : status === "Needs review"
+            ? "needs_review"
+            : "loaded",
+      row_count: validationSummary.totalRows,
+      error_count: validationSummary.errorRows,
+      warning_count: validationSummary.warningRows,
+    })
+    .eq("id", uploadedFile.id);
+
+  if (uploadedFileUpdateError) {
+    throw new Error(`Upload metadata update failed: ${uploadedFileUpdateError.message}`);
   }
 
   if (parsed) {
@@ -401,6 +478,11 @@ export async function uploadMonthlyCloseFile({
       uploaded_file_id: uploadedFile.id,
       prior_uploaded_file_id: existingItem?.uploaded_file_id ?? null,
       status,
+      import_batch_id: importBatch?.batchId ?? null,
+      detected_period_start: importBatch?.detectedPeriodStart ?? null,
+      detected_period_end: importBatch?.detectedPeriodEnd ?? null,
+      detected_row_count: importBatch?.detectedRowCount ?? null,
+      unmapped_row_count: importBatch?.unmappedRowCount ?? null,
     },
   });
 
@@ -431,6 +513,12 @@ export async function updateMonthlyCloseItemStatus({
     );
   }
 
+  if (status === "Approved" && hasBlockingMappingIssues(item)) {
+    throw new Error(
+      "This file has unmapped accounts. Review Account Mapping before approving reporting data.",
+    );
+  }
+
   const approvedFields =
     status === "Approved"
       ? {
@@ -453,6 +541,25 @@ export async function updateMonthlyCloseItemStatus({
 
   if (error) {
     throw new Error(`Monthly close status update failed: ${error.message}`);
+  }
+
+  if (item.uploaded_file_id) {
+    const { error: batchError } = await supabase
+      .from("import_batches")
+      .update({
+        status:
+          status === "Approved"
+            ? "Approved"
+            : status === "Needs Mapping"
+              ? "Needs Mapping"
+              : "Ready for Review",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("uploaded_file_id", item.uploaded_file_id);
+
+    if (batchError) {
+      console.error("Import batch status update failed", batchError);
+    }
   }
 
   await logMonthlyCloseActivity({
@@ -486,6 +593,15 @@ export async function removeMonthlyCloseFile(item: MonthlyCloseItem) {
 
     if (uploadError) {
       throw new Error(`Upload record update failed: ${uploadError.message}`);
+    }
+
+    const { error: batchError } = await supabase
+      .from("import_batches")
+      .update({ status: "Rejected", updated_at: new Date().toISOString() })
+      .eq("uploaded_file_id", item.uploaded_file_id);
+
+    if (batchError) {
+      console.error("Import batch removal update failed", batchError);
     }
   }
 
@@ -553,7 +669,6 @@ function parseSupportedUpload(
 async function persistParsedMonthlyRows({
   companyId,
   uploadedFileId,
-  reportingMonth,
   fileCategory,
   parsed,
 }: {
@@ -569,7 +684,7 @@ async function persistParsedMonthlyRows({
       .filter(
         (row) =>
           row.status !== "Error" &&
-          row.month === reportingMonth &&
+          Boolean(row.month) &&
           row.amount !== null,
       )
       .map((row) => ({
@@ -581,7 +696,7 @@ async function persistParsedMonthlyRows({
         amount: row.amount,
       }));
 
-    await replaceRowsForMonth(table, companyId, reportingMonth);
+    await replaceRowsForMonths(table, companyId, rows.map((row) => row.month));
     await insertRows(table, rows);
     return;
   }
@@ -591,7 +706,7 @@ async function persistParsedMonthlyRows({
       .filter(
         (row) =>
           row.status !== "Error" &&
-          row.month === reportingMonth &&
+          Boolean(row.month) &&
           row.cashBalance !== null,
       )
       .map((row) => ({
@@ -601,14 +716,14 @@ async function persistParsedMonthlyRows({
         cash_balance: row.cashBalance,
       }));
 
-    await replaceRowsForMonth("cash_rows", companyId, reportingMonth);
+    await replaceRowsForMonths("cash_rows", companyId, rows.map((row) => row.month));
     await insertRows("cash_rows", rows);
     return;
   }
 
   if (fileCategory === "payroll") {
     const rows = (parsed.rows as UploadedPayrollRow[])
-      .filter((row) => row.status !== "Error" && row.month === reportingMonth)
+      .filter((row) => row.status !== "Error" && Boolean(row.month))
       .map((row) => ({
         company_id: companyId,
         uploaded_file_id: uploadedFileId,
@@ -624,7 +739,7 @@ async function persistParsedMonthlyRows({
         status: row.statusText,
       }));
 
-    await replaceRowsForMonth("payroll_rows", companyId, reportingMonth);
+    await replaceRowsForMonths("payroll_rows", companyId, rows.map((row) => row.month));
     await insertRows("payroll_rows", rows);
     return;
   }
@@ -634,7 +749,7 @@ async function persistParsedMonthlyRows({
       .filter(
         (row) =>
           row.status !== "Error" &&
-          row.month === reportingMonth &&
+          Boolean(row.month) &&
           row.amount !== null,
       )
       .map((row) => ({
@@ -647,7 +762,11 @@ async function persistParsedMonthlyRows({
         amount: row.amount,
       }));
 
-    await replaceRowsForMonth("revenue_detail_rows", companyId, reportingMonth);
+    await replaceRowsForMonths(
+      "revenue_detail_rows",
+      companyId,
+      rows.map((row) => row.month),
+    );
     await insertRows("revenue_detail_rows", rows);
   }
 }
@@ -665,7 +784,18 @@ async function fetchItems(companyId: string, reportingMonth: string) {
     throw new Error(`Monthly close checklist load failed: ${error.message}`);
   }
 
-  return orderItems((data ?? []) as MonthlyCloseItem[]);
+  const items = orderItems((data ?? []) as MonthlyCloseItem[]);
+  const uploadedFileIds = items
+    .map((item) => item.uploaded_file_id)
+    .filter((id): id is string => Boolean(id));
+  const batchesByUploadedFile = await loadImportBatchesForUploadedFiles(uploadedFileIds);
+
+  return items.map((item) => ({
+    ...item,
+    import_batch: item.uploaded_file_id
+      ? batchesByUploadedFile.get(item.uploaded_file_id) ?? null
+      : null,
+  }));
 }
 
 async function fetchItem(
@@ -768,20 +898,26 @@ function orderItems(items: MonthlyCloseItem[]) {
   );
 }
 
-async function replaceRowsForMonth(
+async function replaceRowsForMonths(
   table: string,
   companyId: string,
-  reportingMonth: string,
+  reportingMonths: string[],
 ) {
+  const months = [...new Set(reportingMonths.filter(Boolean))];
+
+  if (months.length === 0) {
+    return;
+  }
+
   const supabase = createClient();
   const { error } = await supabase
     .from(table)
     .delete()
     .eq("company_id", companyId)
-    .eq("month", reportingMonth);
+    .in("month", months);
 
   if (error) {
-    throw new Error(`${table} monthly row replacement failed: ${error.message}`);
+    throw new Error(`${table} row replacement failed: ${error.message}`);
   }
 }
 
@@ -838,6 +974,32 @@ function previousMonthKey(reportingMonth: string) {
 function hasValidationIssue(summary: ValidationSummary) {
   return summary.issues.some((issue: DataQualityIssue) =>
     ["Warning", "Critical"].includes(issue.severity),
+  );
+}
+
+function getUploadStatusFromValidation({
+  fileCategory,
+  validationSummary,
+  importBatch,
+}: {
+  fileCategory: MonthlyCloseCategory;
+  validationSummary: ValidationSummary;
+  importBatch: Awaited<ReturnType<typeof createImportBatchForUpload>> | null;
+}): MonthlyCloseStatus {
+  if (
+    (fileCategory === "actuals" || fileCategory === "budget") &&
+    (importBatch?.unmappedRowCount ?? 0) > 0
+  ) {
+    return "Needs Mapping";
+  }
+
+  return hasValidationIssue(validationSummary) ? "Needs review" : "Uploaded";
+}
+
+function hasBlockingMappingIssues(item: MonthlyCloseItem) {
+  return (
+    (item.file_category === "actuals" || item.file_category === "budget") &&
+    (item.import_batch?.unmapped_row_count ?? 0) > 0
   );
 }
 
