@@ -649,6 +649,7 @@ function DataSourceBadge({ label }: { label: string }) {
 }
 
 function sourceSummary(sources: DataSourceMode[]) {
+  if (sources.includes("demoData")) return "Demo Data";
   if (sources.some(isApprovedDataSource)) return "Approved Data Room";
   if (sources.some(isUnapprovedDataSource)) return "Unapproved upload - review pending";
   if (sources.includes("saved")) return "Saved company uploads";

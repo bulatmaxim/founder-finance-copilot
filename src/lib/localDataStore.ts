@@ -20,6 +20,7 @@ import type {
 
 export type DataSourceMode =
   | "sample"
+  | "demoData"
   | "uploaded"
   | "approved"
   | "approvedManualEntry"
@@ -643,6 +644,7 @@ export function getActiveCashData(): ActiveCashData {
 }
 
 export function getCashSourceLabel(dataSource: DataSourceMode) {
+  if (dataSource === "demoData") return "Cash Source: Demo Data";
   if (dataSource === "approved") return "Cash Source: Approved Data Room";
   if (dataSource === "approvedManualEntry") return "Cash Source: Approved Data Room - Manual Entry";
   if (dataSource === "approvedManualAdjustment") return "Cash Source: Approved Data Room - Manually Adjusted";
@@ -814,6 +816,7 @@ export function getBudgetForMonth(month: string, fallbackIndex = 0) {
 }
 
 export function getDataSourceLabel(dataSource: DataSourceMode) {
+  if (dataSource === "demoData") return "Data Source: Demo Data";
   if (dataSource === "approved") return "Data Source: Approved Data Room";
   if (dataSource === "approvedManualEntry") return "Data Source: Approved Data Room - Manual Entry";
   if (dataSource === "approvedManualAdjustment") return "Data Source: Approved Data Room - Manually Adjusted";
@@ -826,6 +829,7 @@ export function getDataSourceLabel(dataSource: DataSourceMode) {
 }
 
 export function getActualsSourceLabel(dataSource: DataSourceMode) {
+  if (dataSource === "demoData") return "Actuals Source: Demo Data";
   if (dataSource === "approved") return "Actuals Source: Approved Data Room";
   if (dataSource === "approvedManualEntry") return "Actuals Source: Approved Data Room - Manual Entry";
   if (dataSource === "approvedManualAdjustment") return "Actuals Source: Approved Data Room - Manually Adjusted";
@@ -838,6 +842,7 @@ export function getActualsSourceLabel(dataSource: DataSourceMode) {
 }
 
 export function getBudgetSourceLabel(dataSource: DataSourceMode) {
+  if (dataSource === "demoData") return "Budget Source: Demo Data";
   if (dataSource === "approved") return "Budget Source: Approved Data Room";
   if (dataSource === "approvedManualEntry") return "Budget Source: Approved Data Room - Manual Entry";
   if (dataSource === "approvedManualAdjustment") return "Budget Source: Approved Data Room - Manually Adjusted";
@@ -1225,7 +1230,8 @@ export function isCompanyDataSource(dataSource: DataSourceMode) {
 }
 
 export function isApprovedDataSource(dataSource: DataSourceMode) {
-  return dataSource === "approved" ||
+  return dataSource === "demoData" ||
+    dataSource === "approved" ||
     dataSource === "approvedManualEntry" ||
     dataSource === "approvedManualAdjustment";
 }
@@ -1286,7 +1292,8 @@ function getUploadedRowsPayload<T>(
 }
 
 function normalizeSourceMode(value: unknown): Exclude<DataSourceMode, "sample"> | undefined {
-  return value === "approved" ||
+  return value === "demoData" ||
+    value === "approved" ||
     value === "approvedManualEntry" ||
     value === "approvedManualAdjustment" ||
     value === "saved" ||

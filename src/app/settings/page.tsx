@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DemoCompanyLoader } from "@/components/DemoCompanyLoader";
 import { ThemeControls } from "@/components/ThemeControls";
 import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
 
@@ -47,6 +48,8 @@ export default function SettingsPage() {
           <ThemeControls />
         </div>
       </section>
+
+      <DemoCompanyLoader />
 
       <section className="premium-card rounded-2xl p-5">
         <h2 className="text-base font-semibold text-[color:var(--text-strong)]">Account</h2>

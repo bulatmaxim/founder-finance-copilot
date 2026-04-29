@@ -9,6 +9,7 @@ export function ReportingSourceNotice({
   sources: DataSourceMode[];
 }) {
   const hasUnapproved = sources.some(isUnapprovedDataSource);
+  const hasDemoData = sources.includes("demoData");
   const hasCompanyData = sources.some((source) => source !== "sample");
   const hasSample = sources.includes("sample");
 
@@ -26,6 +27,15 @@ export function ReportingSourceNotice({
       <Notice>
         Source: Demo sample data. Connect approved company uploads in the Data
         Room before using this for operating decisions.
+      </Notice>
+    );
+  }
+
+  if (hasDemoData) {
+    return (
+      <Notice>
+        Source: Demo Data. This workspace is populated with fictional
+        Northstar Analytics data for product evaluation.
       </Notice>
     );
   }

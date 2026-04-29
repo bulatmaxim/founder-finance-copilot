@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
+import { DemoCompanyLoader } from "@/components/DemoCompanyLoader";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { ForecastVersionNotice } from "@/components/ForecastVersionNotice";
 import { MetricCard } from "@/components/MetricCard";
@@ -110,6 +111,10 @@ export function DashboardPageContent() {
   const budgetSourceLabel = getBudgetSourceLabel(activeBudget.dataSource);
   const cashSourceLabel = getCashSourceLabel(activeCash.dataSource);
   const uploadedPayroll = getUploadedPayroll();
+  const isDemoEmptyState =
+    activeData.dataSource === "sample" &&
+    activeBudget.dataSource === "sample" &&
+    activeCash.dataSource === "sample";
   const latestPayrollMonth = [...new Set(uploadedPayroll.map((row) => row.month))]
     .sort()
     .at(-1);
@@ -288,6 +293,17 @@ export function DashboardPageContent() {
         sources={[activeData.dataSource, activeBudget.dataSource, activeCash.dataSource]}
       />
 
+      {isDemoEmptyState ? (
+        <DemoCompanyLoader
+          compact
+          onLoaded={() => {
+            setActiveCash(getActiveCashData());
+            setActiveBudget(getActiveBudgetData());
+            setActiveData(getActiveFinancialData());
+          }}
+        />
+      ) : null}
+
       <AccountMappingNotice />
 
       <ForecastVersionNotice />
@@ -387,6 +403,7 @@ function DataSourceBadge({ label }: { label: string }) {
 }
 
 function sourceSummary(sources: DataSourceMode[]) {
+  if (sources.includes("demoData")) return "Demo Data";
   if (sources.some(isApprovedDataSource)) return "Approved Data Room";
   if (sources.some(isUnapprovedDataSource)) return "Unapproved upload - review pending";
   if (sources.includes("saved")) return "Saved company uploads";

@@ -370,10 +370,15 @@ function sourceModeForCloseItems(
   items: { uploaded_file_id: string | null; file_name: string | null }[],
   approvalState: "approved" | "unapproved",
 ) {
+  const hasDemoData = items.some((item) =>
+    String(item.file_name ?? "").toLowerCase().includes("demo data"),
+  );
   const hasManualAdjustment = items.some((item) =>
     String(item.file_name ?? "").toLowerCase().includes("manually adjusted"),
   );
   const hasManualEntry = items.some((item) => !item.uploaded_file_id);
+
+  if (hasDemoData) return "demoData" as const;
 
   if (approvalState === "approved") {
     if (hasManualAdjustment) return "approvedManualAdjustment" as const;
