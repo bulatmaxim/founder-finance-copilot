@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { sampleCompany } from "@/data/sampleCompany";
 import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
@@ -58,12 +57,14 @@ export function TopBar() {
             </p>
             <p className="mt-1 text-[color:var(--text-muted)]">Single-company workspace</p>
           </div>
-          <Link
-            href="/logout"
-            className="premium-pill inline-flex h-10 items-center justify-center rounded-2xl px-4 text-sm font-medium hover:border-sky-300/30 hover:bg-sky-300/10"
-          >
-            Log out
-          </Link>
+          <form action="/auth/sign-out" method="post">
+            <button
+              type="submit"
+              className="premium-pill inline-flex h-10 items-center justify-center rounded-2xl px-4 text-sm font-medium hover:border-sky-300/30 hover:bg-sky-300/10"
+            >
+              Log out
+            </button>
+          </form>
         </div>
       </div>
     </header>

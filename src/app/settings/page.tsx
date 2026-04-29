@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ThemeControls } from "@/components/ThemeControls";
 import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
@@ -62,12 +61,14 @@ export default function SettingsPage() {
           </div>
         </dl>
         <div className="mt-6">
-          <Link
-            href="/logout"
-            className="premium-pill inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium hover:border-sky-300/30 hover:bg-sky-300/10"
-          >
-            Log out
-          </Link>
+          <form action="/auth/sign-out" method="post">
+            <button
+              type="submit"
+              className="premium-pill inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium hover:border-sky-300/30 hover:bg-sky-300/10"
+            >
+              Log out
+            </button>
+          </form>
         </div>
       </section>
 
