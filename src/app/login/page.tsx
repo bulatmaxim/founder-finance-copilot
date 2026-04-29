@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { Toast, type ToastMessage } from "@/components/Toast";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -41,8 +39,7 @@ export default function LoginPage() {
         throw new Error(result?.error ?? "Check your email and password.");
       }
 
-      router.replace(result?.next ?? "/dashboard");
-      router.refresh();
+      window.location.assign(result?.next ?? "/dashboard");
     } catch (error) {
       console.error("Login failed", error);
       setToast({

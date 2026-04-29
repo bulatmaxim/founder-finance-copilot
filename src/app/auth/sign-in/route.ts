@@ -2,9 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { safeInternalPath } from "@/lib/authRedirects";
 import { createClient, hasSupabaseServerEnv } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(request: NextRequest) {
   if (!hasSupabaseServerEnv()) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: "Supabase is not configured." },
       { status: 500 },
     );
@@ -19,7 +21,7 @@ export async function POST(request: NextRequest) {
   const password = typeof body?.password === "string" ? body.password : "";
 
   if (!email || !password) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: "Email and password are required." },
       { status: 400 },
     );
@@ -32,13 +34,21 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 401 });
+    return noStoreJson({ error: error.message }, { status: 401 });
   }
 
-  return NextResponse.json({
+  return noStoreJson({
     next: safeInternalPath(
       typeof body?.next === "string" ? body.next : null,
       "/dashboard",
     ),
   });
+}
+
+function noStoreJson(body: unknown, init?: ResponseInit) {
+  const response = NextResponse.json(body, init);
+  response.headers.set("Cache-Control", "no-store, max-age=0");
+  response.headers.set("Vary", "Cookie");
+
+  return response;
 }

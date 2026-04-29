@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { Toast, type ToastMessage } from "@/components/Toast";
 
 export default function SignupPage() {
-  const router = useRouter();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -47,8 +45,7 @@ export default function SignupPage() {
           : "Check your email if confirmation is enabled, then log in.",
       });
 
-      router.replace(result?.next ?? (result?.hasSession ? "/onboarding" : "/login"));
-      router.refresh();
+      window.location.assign(result?.next ?? (result?.hasSession ? "/onboarding" : "/login"));
     } catch (error) {
       console.error("Signup failed", error);
       setToast({

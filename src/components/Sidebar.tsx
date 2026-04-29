@@ -81,6 +81,7 @@ function SidebarContent({
       <div className="flex items-center justify-between gap-3">
         <Link
           href="/dashboard"
+          prefetch={false}
           onClick={onClose}
           className="flex min-w-0 items-center gap-3"
         >
@@ -134,6 +135,7 @@ function SidebarContent({
                   <Link
                     key={item.href}
                     href={item.href}
+                    prefetch={false}
                     onClick={onClose}
                     className={`premium-nav-link flex min-h-10 items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium ${
                       isActive ? "premium-nav-link-active" : ""

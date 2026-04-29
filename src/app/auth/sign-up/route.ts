@@ -1,9 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { getRequestOrigin } from "@/lib/supabase/cookieOptions";
 import { createClient, hasSupabaseServerEnv } from "@/lib/supabase/server";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   if (!hasSupabaseServerEnv()) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: "Supabase is not configured." },
       { status: 500 },
     );
@@ -19,14 +22,14 @@ export async function POST(request: NextRequest) {
   const fullName = typeof body?.fullName === "string" ? body.fullName : "";
 
   if (!email || !password) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: "Email and password are required." },
       { status: 400 },
     );
   }
 
   const supabase = await createClient();
-  const origin = request.nextUrl.origin;
+  const origin = getRequestOrigin(request);
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -37,7 +40,7 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+    return noStoreJson({ error: error.message }, { status: 400 });
   }
 
   if (data.user && data.session) {
@@ -49,12 +52,20 @@ export async function POST(request: NextRequest) {
     });
 
     if (profileError) {
-      return NextResponse.json({ error: profileError.message }, { status: 400 });
+      return noStoreJson({ error: profileError.message }, { status: 400 });
     }
   }
 
-  return NextResponse.json({
+  return noStoreJson({
     hasSession: Boolean(data.session),
     next: data.session ? "/onboarding" : "/login",
   });
+}
+
+function noStoreJson(body: unknown, init?: ResponseInit) {
+  const response = NextResponse.json(body, init);
+  response.headers.set("Cache-Control", "no-store, max-age=0");
+  response.headers.set("Vary", "Cookie");
+
+  return response;
 }

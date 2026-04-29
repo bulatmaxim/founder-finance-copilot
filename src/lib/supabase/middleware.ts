@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { supabaseCookieOptions } from "@/lib/supabase/cookieOptions";
 
 const protectedRoutes = [
   "/dashboard",
@@ -25,11 +26,12 @@ export async function updateSession(request: NextRequest) {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    return NextResponse.next({ request });
+    return withAuthResponseHeaders(NextResponse.next({ request }));
   }
 
-  let response = NextResponse.next({ request });
+  let response = withAuthResponseHeaders(NextResponse.next({ request }));
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookieOptions: supabaseCookieOptions,
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -38,7 +40,7 @@ export async function updateSession(request: NextRequest) {
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value),
         );
-        response = NextResponse.next({ request });
+        response = withAuthResponseHeaders(NextResponse.next({ request }));
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options),
         );
@@ -112,5 +114,12 @@ function redirectWithCookies(url: URL, response: NextResponse) {
     redirectResponse.cookies.set(cookie);
   });
 
-  return redirectResponse;
+  return withAuthResponseHeaders(redirectResponse);
+}
+
+function withAuthResponseHeaders(response: NextResponse) {
+  response.headers.set("Cache-Control", "no-store, max-age=0");
+  response.headers.set("Vary", "Cookie");
+
+  return response;
 }

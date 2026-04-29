@@ -1,6 +1,7 @@
 "use client";
 
 import { createBrowserClient } from "@supabase/ssr";
+import { supabaseCookieOptions } from "@/lib/supabase/cookieOptions";
 
 export function hasSupabaseBrowserEnv() {
   return Boolean(
@@ -17,5 +18,12 @@ export function createClient() {
     throw new Error("Supabase browser environment variables are not configured.");
   }
 
-  return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  return createBrowserClient(supabaseUrl, supabaseAnonKey, {
+    cookieOptions: supabaseCookieOptions,
+    auth: {
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      persistSession: true,
+    },
+  });
 }

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { supabaseCookieOptions } from "@/lib/supabase/cookieOptions";
 
 export function hasSupabaseServerEnv() {
   return Boolean(
@@ -18,6 +19,7 @@ export async function createClient() {
   }
 
   return createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookieOptions: supabaseCookieOptions,
     cookies: {
       getAll() {
         return cookieStore.getAll();
