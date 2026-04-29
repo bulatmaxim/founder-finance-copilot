@@ -31,6 +31,7 @@ export type StagedRowValidationStatus =
 
 export type ImportBatchSummary = {
   id: string;
+  uploaded_file_id?: string | null;
   reporting_month: string | null;
   file_category: MonthlyCloseCategory;
   status: ImportBatchStatus;
@@ -245,6 +246,29 @@ export async function loadImportBatchesForUploadedFiles(
   });
 
   return batches;
+}
+
+export async function loadImportBatchesForMonthlyClose({
+  companyId,
+  reportingMonth,
+}: {
+  companyId: string;
+  reportingMonth: string;
+}) {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("import_batches")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("reporting_month", reportingMonth)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Import batch load failed", error);
+    return [];
+  }
+
+  return (data ?? []) as ImportBatchSummary[];
 }
 
 export async function loadStagedAccountRollups() {

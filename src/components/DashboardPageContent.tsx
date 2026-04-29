@@ -35,10 +35,13 @@ import {
   getCashMetricsForMonth,
   getCashSourceLabel,
   getUploadedPayroll,
+  isApprovedDataSource,
   isCompanyDataSource,
+  isUnapprovedDataSource,
   type ActiveFinancialData,
   type ActiveBudgetData,
   type ActiveCashData,
+  type DataSourceMode,
 } from "@/lib/localDataStore";
 
 function shortMonth(month: string) {
@@ -383,9 +386,9 @@ function DataSourceBadge({ label }: { label: string }) {
   );
 }
 
-function sourceSummary(sources: string[]) {
-  if (sources.includes("approved")) return "Approved Data Room";
-  if (sources.includes("unapproved")) return "Unapproved upload - review pending";
+function sourceSummary(sources: DataSourceMode[]) {
+  if (sources.some(isApprovedDataSource)) return "Approved Data Room";
+  if (sources.some(isUnapprovedDataSource)) return "Unapproved upload - review pending";
   if (sources.includes("saved")) return "Saved company uploads";
   if (sources.includes("uploaded")) return "Uploaded CSV data";
   return "Demo sample data";

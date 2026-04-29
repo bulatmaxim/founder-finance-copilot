@@ -19,6 +19,8 @@ import {
   getUploadedPayroll,
   getUploadedPipeline,
   getUploadedRevenueDetail,
+  isApprovedDataSource,
+  isUnapprovedDataSource,
 } from "@/lib/localDataStore";
 
 export type FinanceSummary = ReturnType<typeof buildFinanceSummary>;
@@ -95,13 +97,13 @@ export function buildFinanceSummary(reportingMonth?: string) {
         activeBudget.dataSource === "sample" ||
         activeCash.dataSource === "sample",
       isUsingUnapproved:
-        activeData.dataSource === "unapproved" ||
-        activeBudget.dataSource === "unapproved" ||
-        activeCash.dataSource === "unapproved",
+        isUnapprovedDataSource(activeData.dataSource) ||
+        isUnapprovedDataSource(activeBudget.dataSource) ||
+        isUnapprovedDataSource(activeCash.dataSource),
       monthlyCloseComplete:
-        activeData.dataSource === "approved" &&
-        activeBudget.dataSource === "approved" &&
-        activeCash.dataSource === "approved",
+        isApprovedDataSource(activeData.dataSource) &&
+        isApprovedDataSource(activeBudget.dataSource) &&
+        isApprovedDataSource(activeCash.dataSource),
     },
     metrics: {
       revenueActual: actual.revenue,

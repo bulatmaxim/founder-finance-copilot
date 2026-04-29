@@ -154,10 +154,9 @@ export async function getReportingRowsForMonthlyClose({
   const supabase = createClient();
   const { data: closeItems, error: closeError } = await supabase
     .from("monthly_close_items")
-    .select("reporting_month, status, uploaded_file_id")
+    .select("reporting_month, status, uploaded_file_id, file_name")
     .eq("company_id", company.id)
     .eq("file_category", fileCategory)
-    .not("uploaded_file_id", "is", null)
     .order("reporting_month", { ascending: true });
 
   if (closeError) {
@@ -165,28 +164,26 @@ export async function getReportingRowsForMonthlyClose({
   }
 
   const approvedItems =
-    closeItems?.filter((item) => item.status === "Approved" && item.uploaded_file_id) ??
-    [];
+    closeItems?.filter((item) => item.status === "Approved") ?? [];
   const unapprovedItems =
     closeItems?.filter(
       (item) =>
         item.status !== "Approved" &&
-        item.status !== "Not uploaded" &&
-        item.uploaded_file_id,
+        item.status !== "Not uploaded",
     ) ?? [];
 
   if (approvedItems.length > 0) {
-    const rows = await getRowsForUploadedFiles({
+    const rows = await getRowsForCloseItems({
       table,
       companyId: company.id,
-      uploadedFileIds: approvedItems.map((item) => item.uploaded_file_id as string),
+      items: approvedItems,
       orderBy,
     });
 
     if (rows.length > 0) {
       return {
         rows,
-        sourceMode: "approved" as const,
+        sourceMode: sourceModeForCloseItems(approvedItems, "approved"),
         reportingMonths: approvedItems.map((item) => String(item.reporting_month)),
         closeStatus: "Complete",
       };
@@ -194,17 +191,17 @@ export async function getReportingRowsForMonthlyClose({
   }
 
   if (unapprovedItems.length > 0) {
-    const rows = await getRowsForUploadedFiles({
+    const rows = await getRowsForCloseItems({
       table,
       companyId: company.id,
-      uploadedFileIds: unapprovedItems.map((item) => item.uploaded_file_id as string),
+      items: unapprovedItems,
       orderBy,
     });
 
     if (rows.length > 0) {
       return {
         rows,
-        sourceMode: "unapproved" as const,
+        sourceMode: sourceModeForCloseItems(unapprovedItems, "unapproved"),
         reportingMonths: unapprovedItems.map((item) => String(item.reporting_month)),
         closeStatus: "Incomplete",
       };
@@ -339,6 +336,54 @@ async function getRowsForUploadedFiles({
   }
 
   return data ?? [];
+}
+
+async function getRowsForCloseItems({
+  table,
+  companyId,
+  items,
+  orderBy,
+}: {
+  table: string;
+  companyId: string;
+  items: { uploaded_file_id: string | null; reporting_month: string | null }[];
+  orderBy: string;
+}) {
+  const uploadedFileIds = items
+    .map((item) => item.uploaded_file_id)
+    .filter((id): id is string => Boolean(id));
+  const hasManualWorksheet = items.some((item) => !item.uploaded_file_id);
+
+  if (hasManualWorksheet) {
+    return getRows(table, orderBy);
+  }
+
+  return getRowsForUploadedFiles({
+    table,
+    companyId,
+    uploadedFileIds,
+    orderBy,
+  });
+}
+
+function sourceModeForCloseItems(
+  items: { uploaded_file_id: string | null; file_name: string | null }[],
+  approvalState: "approved" | "unapproved",
+) {
+  const hasManualAdjustment = items.some((item) =>
+    String(item.file_name ?? "").toLowerCase().includes("manually adjusted"),
+  );
+  const hasManualEntry = items.some((item) => !item.uploaded_file_id);
+
+  if (approvalState === "approved") {
+    if (hasManualAdjustment) return "approvedManualAdjustment" as const;
+    if (hasManualEntry) return "approvedManualEntry" as const;
+    return "approved" as const;
+  }
+
+  if (hasManualAdjustment) return "unapprovedManualAdjustment" as const;
+  if (hasManualEntry) return "unapprovedManualEntry" as const;
+  return "unapproved" as const;
 }
 
 export async function persistUploadedCsv({

@@ -34,11 +34,14 @@ import {
   getUploadedPayroll,
   getUploadedPipeline,
   getUploadedRevenueDetail,
+  isApprovedDataSource,
   isCompanyDataSource,
+  isUnapprovedDataSource,
   type AICfoBrief,
   type ActiveBudgetData,
   type ActiveCashData,
   type ActiveFinancialData,
+  type DataSourceMode,
 } from "@/lib/localDataStore";
 import { generateMonthlyCfoDeck } from "@/lib/powerpoint";
 import { hasSupabaseBrowserEnv } from "@/lib/supabase/client";
@@ -209,9 +212,9 @@ export function CFOBrief() {
               forecastVersionName: forecastContext?.name ?? null,
               forecastDriverSummary: forecastDriverSummary || null,
               warning:
-                activeData.dataSource === "unapproved" ||
-                activeBudget.dataSource === "unapproved" ||
-                activeCash.dataSource === "unapproved"
+                isUnapprovedDataSource(activeData.dataSource) ||
+                isUnapprovedDataSource(activeBudget.dataSource) ||
+                isUnapprovedDataSource(activeCash.dataSource)
                   ? `Monthly close is not complete for ${deckMonth}.`
                   : null,
             },
@@ -645,9 +648,9 @@ function DataSourceBadge({ label }: { label: string }) {
   );
 }
 
-function sourceSummary(sources: string[]) {
-  if (sources.includes("approved")) return "Approved Data Room";
-  if (sources.includes("unapproved")) return "Unapproved upload - review pending";
+function sourceSummary(sources: DataSourceMode[]) {
+  if (sources.some(isApprovedDataSource)) return "Approved Data Room";
+  if (sources.some(isUnapprovedDataSource)) return "Unapproved upload - review pending";
   if (sources.includes("saved")) return "Saved company uploads";
   if (sources.includes("uploaded")) return "Uploaded CSV data";
   return "Demo sample data";

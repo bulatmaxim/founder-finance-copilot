@@ -18,7 +18,16 @@ import type {
   UploadedRevenueDetailRow,
 } from "@/types/financial";
 
-export type DataSourceMode = "sample" | "uploaded" | "approved" | "saved" | "unapproved";
+export type DataSourceMode =
+  | "sample"
+  | "uploaded"
+  | "approved"
+  | "approvedManualEntry"
+  | "approvedManualAdjustment"
+  | "saved"
+  | "unapproved"
+  | "unapprovedManualEntry"
+  | "unapprovedManualAdjustment";
 
 export type DataSourceMetadata = {
   sourceMode?: Exclude<DataSourceMode, "sample">;
@@ -635,8 +644,12 @@ export function getActiveCashData(): ActiveCashData {
 
 export function getCashSourceLabel(dataSource: DataSourceMode) {
   if (dataSource === "approved") return "Cash Source: Approved Data Room";
+  if (dataSource === "approvedManualEntry") return "Cash Source: Approved Data Room - Manual Entry";
+  if (dataSource === "approvedManualAdjustment") return "Cash Source: Approved Data Room - Manually Adjusted";
   if (dataSource === "saved") return "Cash Source: Saved company uploads";
   if (dataSource === "unapproved") return "Cash Source: Unapproved upload - review pending";
+  if (dataSource === "unapprovedManualEntry") return "Cash Source: Unapproved Manual Entry";
+  if (dataSource === "unapprovedManualAdjustment") return "Cash Source: Unapproved Manual Adjustment";
   if (dataSource === "uploaded") return "Cash Source: Uploaded Cash CSV";
   return "Cash Source: Demo sample data";
 }
@@ -781,7 +794,7 @@ export function getActiveBudgetData(): ActiveBudgetData {
 
   return {
     periods: converted.periods,
-    dataSource: "uploaded",
+    dataSource: payload.sourceMode ?? "uploaded",
     uploadedRows: payload.rows,
     savedAt: payload.savedAt,
     warnings: converted.warnings,
@@ -802,24 +815,36 @@ export function getBudgetForMonth(month: string, fallbackIndex = 0) {
 
 export function getDataSourceLabel(dataSource: DataSourceMode) {
   if (dataSource === "approved") return "Data Source: Approved Data Room";
+  if (dataSource === "approvedManualEntry") return "Data Source: Approved Data Room - Manual Entry";
+  if (dataSource === "approvedManualAdjustment") return "Data Source: Approved Data Room - Manually Adjusted";
   if (dataSource === "saved") return "Data Source: Saved company uploads";
   if (dataSource === "unapproved") return "Data Source: Unapproved upload - review pending";
+  if (dataSource === "unapprovedManualEntry") return "Data Source: Unapproved Manual Entry";
+  if (dataSource === "unapprovedManualAdjustment") return "Data Source: Unapproved Manual Adjustment";
   if (dataSource === "uploaded") return "Data Source: Uploaded CSV Data";
   return "Data Source: Demo sample data";
 }
 
 export function getActualsSourceLabel(dataSource: DataSourceMode) {
   if (dataSource === "approved") return "Actuals Source: Approved Data Room";
+  if (dataSource === "approvedManualEntry") return "Actuals Source: Approved Data Room - Manual Entry";
+  if (dataSource === "approvedManualAdjustment") return "Actuals Source: Approved Data Room - Manually Adjusted";
   if (dataSource === "saved") return "Actuals Source: Saved company uploads";
   if (dataSource === "unapproved") return "Actuals Source: Unapproved upload - review pending";
+  if (dataSource === "unapprovedManualEntry") return "Actuals Source: Unapproved Manual Entry";
+  if (dataSource === "unapprovedManualAdjustment") return "Actuals Source: Unapproved Manual Adjustment";
   if (dataSource === "uploaded") return "Actuals Source: Uploaded Actuals CSV";
   return "Actuals Source: Demo sample data";
 }
 
 export function getBudgetSourceLabel(dataSource: DataSourceMode) {
   if (dataSource === "approved") return "Budget Source: Approved Data Room";
+  if (dataSource === "approvedManualEntry") return "Budget Source: Approved Data Room - Manual Entry";
+  if (dataSource === "approvedManualAdjustment") return "Budget Source: Approved Data Room - Manually Adjusted";
   if (dataSource === "saved") return "Budget Source: Saved company uploads";
   if (dataSource === "unapproved") return "Budget Source: Unapproved upload - review pending";
+  if (dataSource === "unapprovedManualEntry") return "Budget Source: Unapproved Manual Entry";
+  if (dataSource === "unapprovedManualAdjustment") return "Budget Source: Unapproved Manual Adjustment";
   if (dataSource === "uploaded") return "Budget Source: Uploaded Budget CSV";
   return "Budget Source: Demo sample data";
 }
@@ -1199,6 +1224,18 @@ export function isCompanyDataSource(dataSource: DataSourceMode) {
   return dataSource !== "sample";
 }
 
+export function isApprovedDataSource(dataSource: DataSourceMode) {
+  return dataSource === "approved" ||
+    dataSource === "approvedManualEntry" ||
+    dataSource === "approvedManualAdjustment";
+}
+
+export function isUnapprovedDataSource(dataSource: DataSourceMode) {
+  return dataSource === "unapproved" ||
+    dataSource === "unapprovedManualEntry" ||
+    dataSource === "unapprovedManualAdjustment";
+}
+
 function saveUploadedRows<T>(key: string, rows: T[]) {
   if (!canUseLocalStorage()) {
     return;
@@ -1250,8 +1287,12 @@ function getUploadedRowsPayload<T>(
 
 function normalizeSourceMode(value: unknown): Exclude<DataSourceMode, "sample"> | undefined {
   return value === "approved" ||
+    value === "approvedManualEntry" ||
+    value === "approvedManualAdjustment" ||
     value === "saved" ||
     value === "unapproved" ||
+    value === "unapprovedManualEntry" ||
+    value === "unapprovedManualAdjustment" ||
     value === "uploaded"
     ? value
     : undefined;

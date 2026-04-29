@@ -9,6 +9,7 @@ import {
 } from "@/lib/csvParser";
 import {
   createImportBatchForUpload,
+  loadImportBatchesForMonthlyClose,
   loadImportBatchesForUploadedFiles,
   mergeValidationSummaries,
   type ImportBatchSummary,
@@ -543,7 +544,11 @@ export async function updateMonthlyCloseItemStatus({
     throw new Error(`Monthly close status update failed: ${error.message}`);
   }
 
-  if (item.uploaded_file_id) {
+  if (status === "Approved") {
+    await materializeApprovedStagedRows(item);
+  }
+
+  if (item.uploaded_file_id || item.import_batch?.id) {
     const { error: batchError } = await supabase
       .from("import_batches")
       .update({
@@ -555,7 +560,7 @@ export async function updateMonthlyCloseItemStatus({
               : "Ready for Review",
         updated_at: new Date().toISOString(),
       })
-      .eq("uploaded_file_id", item.uploaded_file_id);
+      .eq(item.uploaded_file_id ? "uploaded_file_id" : "id", item.uploaded_file_id ?? item.import_batch?.id);
 
     if (batchError) {
       console.error("Import batch status update failed", batchError);
@@ -602,6 +607,17 @@ export async function removeMonthlyCloseFile(item: MonthlyCloseItem) {
 
     if (batchError) {
       console.error("Import batch removal update failed", batchError);
+    }
+  }
+
+  if (!item.uploaded_file_id && item.import_batch?.id) {
+    const { error: batchError } = await supabase
+      .from("import_batches")
+      .update({ status: "Rejected", updated_at: new Date().toISOString() })
+      .eq("id", item.import_batch.id);
+
+    if (batchError) {
+      console.error("Manual import batch removal update failed", batchError);
     }
   }
 
@@ -788,13 +804,21 @@ async function fetchItems(companyId: string, reportingMonth: string) {
   const uploadedFileIds = items
     .map((item) => item.uploaded_file_id)
     .filter((id): id is string => Boolean(id));
-  const batchesByUploadedFile = await loadImportBatchesForUploadedFiles(uploadedFileIds);
+  const [batchesByUploadedFile, monthlyBatches] = await Promise.all([
+    loadImportBatchesForUploadedFiles(uploadedFileIds),
+    loadImportBatchesForMonthlyClose({ companyId, reportingMonth }),
+  ]);
 
   return items.map((item) => ({
     ...item,
     import_batch: item.uploaded_file_id
       ? batchesByUploadedFile.get(item.uploaded_file_id) ?? null
-      : null,
+      : monthlyBatches.find(
+          (batch) =>
+            batch.file_category === item.file_category &&
+            !batch.uploaded_file_id &&
+            batch.status !== "Rejected",
+        ) ?? null,
   }));
 }
 
@@ -932,6 +956,142 @@ async function insertRows(table: string, rows: Record<string, unknown>[]) {
   if (error) {
     throw new Error(`${table} insert failed: ${error.message}`);
   }
+}
+
+async function materializeApprovedStagedRows(item: MonthlyCloseItem) {
+  const importBatchId = item.import_batch?.id;
+
+  if (!importBatchId) {
+    return;
+  }
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("import_staged_rows")
+    .select("*")
+    .eq("import_batch_id", importBatchId)
+    .order("source_row_number", { ascending: true });
+
+  if (error) {
+    throw new Error(`Approved staged rows load failed: ${error.message}`);
+  }
+
+  const stagedRows = (data ?? []).filter(
+    (row) => String(row.mapping_status ?? "") !== "Ignored",
+  );
+  const periods = [
+    ...new Set(
+      stagedRows
+        .map((row) => monthFromDate(String(row.period ?? "")))
+        .filter(Boolean),
+    ),
+  ];
+
+  if (periods.length === 0) {
+    return;
+  }
+
+  if (item.file_category === "actuals" || item.file_category === "budget") {
+    const table =
+      item.file_category === "actuals" ? "financial_actuals" : "budget_rows";
+    const rows = stagedRows
+      .map((row) => ({
+        company_id: item.company_id,
+        uploaded_file_id: item.uploaded_file_id,
+        month: monthFromDate(String(row.period ?? "")),
+        account: String(row.raw_account_name ?? ""),
+        category: String(row.mapped_category || row.raw_category || "Uncategorized"),
+        amount: toNumber(row.amount),
+      }))
+      .filter((row) => row.month && row.account && row.amount !== null);
+
+    await replaceRowsForMonths(table, item.company_id, periods);
+    await insertRows(table, rows);
+    return;
+  }
+
+  if (item.file_category === "cash") {
+    const rows = stagedRows
+      .map((row) => ({
+        company_id: item.company_id,
+        uploaded_file_id: item.uploaded_file_id,
+        month: monthFromDate(String(row.period ?? "")),
+        cash_balance: toNumber(row.amount),
+      }))
+      .filter((row) => row.month && row.cash_balance !== null);
+
+    await replaceRowsForMonths("cash_rows", item.company_id, periods);
+    await insertRows("cash_rows", rows);
+    return;
+  }
+
+  if (item.file_category === "payroll") {
+    const rows = stagedRows
+      .map((row) => {
+        const rawData = toRecord(row.raw_data);
+
+        return {
+          company_id: item.company_id,
+          uploaded_file_id: item.uploaded_file_id,
+          month: monthFromDate(String(row.period ?? "")),
+          employee_name: String(row.raw_account_name ?? ""),
+          department: String(row.department ?? ""),
+          role: String(row.raw_category ?? ""),
+          salary: toNumber(row.amount),
+          benefits: null,
+          payroll_tax: null,
+          bonus: null,
+          start_date: rawData.startDate || null,
+          status: rawData.status || null,
+        };
+      })
+      .filter((row) => row.month && row.employee_name);
+
+    await replaceRowsForMonths("payroll_rows", item.company_id, periods);
+    await insertRows("payroll_rows", rows);
+    return;
+  }
+
+  if (item.file_category === "revenue") {
+    const rows = stagedRows
+      .map((row) => ({
+        company_id: item.company_id,
+        uploaded_file_id: item.uploaded_file_id,
+        month: monthFromDate(String(row.period ?? "")),
+        customer: String(row.raw_account_name ?? ""),
+        product: null,
+        revenue_type: String(row.raw_category ?? ""),
+        amount: toNumber(row.amount),
+      }))
+      .filter((row) => row.month && row.amount !== null);
+
+    await replaceRowsForMonths("revenue_detail_rows", item.company_id, periods);
+    await insertRows("revenue_detail_rows", rows);
+  }
+}
+
+function monthFromDate(value: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value.slice(0, 7);
+  }
+
+  if (/^\d{4}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  return "";
+}
+
+function toNumber(value: unknown) {
+  const amount = Number(value);
+
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function toRecord(value: unknown) {
+  return value && typeof value === "object"
+    ? (value as Record<string, string>)
+    : {};
 }
 
 async function loadPriorActualRows(

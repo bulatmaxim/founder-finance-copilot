@@ -78,6 +78,13 @@ export function MonthlyCloseChecklist({
                 const canReview = item.status !== "Not uploaded";
                 const canApprove = item.status !== "Not uploaded";
                 const hasUploadedFile = Boolean(item.uploaded_file_id);
+                const hasWorksheet = Boolean(item.import_batch);
+                const editorHref = `/data-entry?month=${encodeURIComponent(reportingMonth)}&category=${encodeURIComponent(category.id)}${
+                  item.import_batch?.id
+                    ? `&batchId=${encodeURIComponent(item.import_batch.id)}`
+                    : ""
+                }`;
+                const manualHref = `/data-entry?month=${encodeURIComponent(reportingMonth)}&category=${encodeURIComponent(category.id)}&action=manual`;
 
                 return (
                   <tr key={category.id} className="border-b border-white/10 align-top">
@@ -159,17 +166,32 @@ export function MonthlyCloseChecklist({
                         >
                           {isSaving ? "Saving..." : "Approve"}
                         </button>
-                        {hasUploadedFile ? (
+                        {hasUploadedFile || hasWorksheet ? (
                           <button
                             type="button"
                             disabled={isSaving || isUploading}
                             onClick={() => onRemove(item)}
                             className="h-9 rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10 disabled:cursor-not-allowed disabled:text-slate-600"
                           >
-                            Remove file
+                            {hasUploadedFile ? "Remove file" : "Remove worksheet"}
                           </button>
                         ) : null}
-                        {hasUploadedFile ? (
+                        {hasWorksheet ? (
+                          <Link
+                            href={editorHref}
+                            className="inline-flex h-9 items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10"
+                          >
+                            Open Editor
+                          </Link>
+                        ) : (
+                          <Link
+                            href={manualHref}
+                            className="inline-flex h-9 items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10"
+                          >
+                            Enter Manually
+                          </Link>
+                        )}
+                        {hasWorksheet ? (
                           <Link
                             href="/account-mapping"
                             className="inline-flex h-9 items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10"

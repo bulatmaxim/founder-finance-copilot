@@ -1,5 +1,5 @@
 import type React from "react";
-import { type DataSourceMode } from "@/lib/localDataStore";
+import { isUnapprovedDataSource, type DataSourceMode } from "@/lib/localDataStore";
 
 export function ReportingSourceNotice({
   reportingMonth,
@@ -8,7 +8,7 @@ export function ReportingSourceNotice({
   reportingMonth?: string;
   sources: DataSourceMode[];
 }) {
-  const hasUnapproved = sources.includes("unapproved");
+  const hasUnapproved = sources.some(isUnapprovedDataSource);
   const hasCompanyData = sources.some((source) => source !== "sample");
   const hasSample = sources.includes("sample");
 

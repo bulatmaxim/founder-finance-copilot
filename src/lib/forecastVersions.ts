@@ -17,6 +17,7 @@ import {
   getCurrentCompany,
   getReportingRowsForMonthlyClose,
 } from "@/lib/supabase/data";
+import { isApprovedDataSource } from "@/lib/localDataStore";
 
 export type ForecastVersionType =
   | "Budget"
@@ -537,7 +538,9 @@ async function loadApprovedActualPeriods(actualsThroughMonth: string | null) {
       fileCategory: "actuals",
     }),
   ]);
-  const approvedRows = actualsSource.sourceMode === "approved" ? actualsSource.rows : [];
+  const approvedRows = isApprovedDataSource(actualsSource.sourceMode)
+    ? actualsSource.rows
+    : [];
   const rowsByMonth = new Map<string, Record<string, unknown>[]>();
 
   approvedRows.forEach((row) => {
