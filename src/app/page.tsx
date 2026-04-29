@@ -1,5 +1,5 @@
-import { DashboardPageContent } from "@/components/DashboardPageContent";
+import { redirect } from "next/navigation";
 
 export default function Home() {
-  return <DashboardPageContent />;
+  redirect("/dashboard");
 }

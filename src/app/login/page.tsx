@@ -1,98 +1,62 @@
-"use client";
-
 import Link from "next/link";
-import { FormEvent, useState } from "react";
-import { Toast, type ToastMessage } from "@/components/Toast";
+import { safeInternalPath } from "@/lib/authRedirects";
 
-export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [toast, setToast] = useState<ToastMessage | null>(null);
+type LoginPageProps = {
+  searchParams?: Promise<{
+    authError?: string;
+    next?: string;
+    redirectedFrom?: string;
+  }>;
+};
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    setIsSubmitting(true);
-
-    try {
-      const nextPath =
-        typeof window !== "undefined"
-          ? new URLSearchParams(window.location.search).get("next") ??
-            new URLSearchParams(window.location.search).get("redirectedFrom")
-          : null;
-      const response = await fetch("/auth/sign-in", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password,
-          next: nextPath,
-        }),
-      });
-      const result = (await response.json().catch(() => null)) as {
-        error?: string;
-        next?: string;
-      } | null;
-
-      if (!response.ok) {
-        throw new Error(result?.error ?? "Check your email and password.");
-      }
-
-      window.location.assign(result?.next ?? "/dashboard");
-    } catch (error) {
-      console.error("Login failed", error);
-      setToast({
-        id: Date.now(),
-        type: "error",
-        title: "Login failed.",
-        detail: error instanceof Error ? error.message : "Check your email and password.",
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = (await searchParams) ?? {};
+  const next = safeInternalPath(params.next ?? params.redirectedFrom ?? null, "/dashboard");
 
   return (
-    <section className="mx-auto flex min-h-[70vh] max-w-md items-center">
-      <Toast message={toast} onClose={() => setToast(null)} />
+    <section className="mx-auto flex min-h-[70vh] max-w-md items-center px-5">
       <div className="w-full rounded-md border border-neutral-200 bg-white p-6">
         <p className="text-sm font-medium uppercase tracking-[0.12em] text-neutral-500">
           Founder Finance Copilot
         </p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">Log in</h1>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-950">
+          Log in
+        </h1>
         <p className="mt-3 text-sm leading-6 text-neutral-600">
-          Access the Acme AI finance workspace.
+          Access your finance workspace.
         </p>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+        {params.authError ? (
+          <div className="mt-5 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {params.authError}
+          </div>
+        ) : null}
+
+        <form action="/auth/sign-in" method="post" className="mt-6 space-y-4">
+          <input type="hidden" name="next" value={next} />
           <label className="block">
             <span className="text-sm font-medium text-neutral-700">Email</span>
             <input
               type="email"
+              name="email"
               required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="mt-2 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm outline-none focus:border-neutral-950"
+              className="mt-2 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 outline-none focus:border-neutral-950"
             />
           </label>
           <label className="block">
             <span className="text-sm font-medium text-neutral-700">Password</span>
             <input
               type="password"
+              name="password"
               required
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="mt-2 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm outline-none focus:border-neutral-950"
+              className="mt-2 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 outline-none focus:border-neutral-950"
             />
           </label>
           <button
             type="submit"
-            disabled={isSubmitting}
-            className="h-11 w-full rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+            className="h-11 w-full rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800"
           >
-            {isSubmitting ? "Logging in..." : "Log in"}
+            Log in
           </button>
         </form>
 

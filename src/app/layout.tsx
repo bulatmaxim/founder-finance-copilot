@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
-import { Sidebar } from "@/components/Sidebar";
-import { SupabaseDataHydrator } from "@/components/SupabaseDataHydrator";
-import { ThemeProvider } from "@/components/ThemeProvider";
-import { TopBar } from "@/components/TopBar";
+import { AppShell } from "@/components/AppShell";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -49,17 +46,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>
-        <div className="premium-shell">
-          <ThemeProvider />
-          <SupabaseDataHydrator />
-          <Sidebar />
-          <div className="premium-main min-h-screen lg:pl-[18rem]">
-            <TopBar />
-            <main className="mx-auto max-w-[1680px] px-5 py-7 sm:px-8 lg:px-10 xl:px-12">
-              {children}
-            </main>
-          </div>
-        </div>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

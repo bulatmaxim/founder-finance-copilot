@@ -7,37 +7,24 @@ import { hasSupabaseServerEnv } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
+  const body = await readSignUpBody(request);
+
   if (!hasSupabaseServerEnv()) {
-    return noStoreJson(
-      { error: "Supabase is not configured." },
-      { status: 500 },
-    );
+    return authErrorRedirect(request, "Supabase is not configured.");
   }
 
-  const body = (await request.json().catch(() => null)) as {
-    email?: unknown;
-    password?: unknown;
-    fullName?: unknown;
-  } | null;
-  const email = typeof body?.email === "string" ? body.email : "";
-  const password = typeof body?.password === "string" ? body.password : "";
-  const fullName = typeof body?.fullName === "string" ? body.fullName : "";
-
-  if (!email || !password) {
-    return noStoreJson(
-      { error: "Email and password are required." },
-      { status: 400 },
-    );
+  if (!body.email || !body.password) {
+    return authErrorRedirect(request, "Email and password are required.");
   }
 
   const routeClient = createRouteClient(request);
   const { supabase } = routeClient;
   const origin = getRequestOrigin(request);
   const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
+    email: body.email,
+    password: body.password,
     options: {
-      data: { full_name: fullName },
+      data: { full_name: body.fullName },
       emailRedirectTo: `${origin}/auth/callback`,
     },
   });
@@ -50,34 +37,33 @@ export async function POST(request: NextRequest) {
       reason: error.message,
       redirectTarget: null,
     });
-    return noStoreJson({ error: error.message }, { status: 400 });
+    return authErrorRedirect(request, error.message);
   }
 
   if (data.user && data.session) {
     const { error: profileError } = await supabase.from("profiles").upsert({
       id: data.user.id,
-      email,
-      full_name: fullName,
+      email: body.email,
+      full_name: body.fullName,
       updated_at: new Date().toISOString(),
     });
 
     if (profileError) {
-      return noStoreJson({ error: profileError.message }, { status: 400 });
+      return authErrorRedirect(request, profileError.message);
     }
   }
 
   const next = data.session ? "/onboarding" : "/login";
-  const response = noStoreJson({
-    hasSession: Boolean(data.session),
-    next,
-  });
+  const response = noStoreRedirect(new URL(next, request.url));
 
   routeClient.applyCookies(response);
+  const responseCookieNames = routeClient.getCookieNamesToSet();
   logAuthDebug("sign-up succeeded", {
     pathname: request.nextUrl.pathname,
     requestCookieNames: cookieNamesFromRequest(request),
-    responseCookieNames: routeClient.getCookieNamesToSet(),
-    hasResponseCookies: routeClient.getCookieNamesToSet().length > 0,
+    responseCookieNames,
+    hasResponseCookies: responseCookieNames.length > 0,
+    hasSetCookieHeader: response.headers.has("set-cookie"),
     hasSession: Boolean(data.session),
     redirectTarget: next,
   });
@@ -85,8 +71,41 @@ export async function POST(request: NextRequest) {
   return response;
 }
 
-function noStoreJson(body: unknown, init?: ResponseInit) {
-  const response = NextResponse.json(body, init);
+async function readSignUpBody(request: NextRequest) {
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const body = (await request.json().catch(() => null)) as {
+      email?: unknown;
+      password?: unknown;
+      fullName?: unknown;
+    } | null;
+
+    return {
+      email: typeof body?.email === "string" ? body.email : "",
+      password: typeof body?.password === "string" ? body.password : "",
+      fullName: typeof body?.fullName === "string" ? body.fullName : "",
+    };
+  }
+
+  const formData = await request.formData();
+
+  return {
+    email: String(formData.get("email") ?? ""),
+    password: String(formData.get("password") ?? ""),
+    fullName: String(formData.get("fullName") ?? ""),
+  };
+}
+
+function authErrorRedirect(request: NextRequest, message: string) {
+  const url = new URL("/signup", request.url);
+  url.searchParams.set("authError", message);
+
+  return noStoreRedirect(url);
+}
+
+function noStoreRedirect(url: URL) {
+  const response = NextResponse.redirect(url, 303);
   response.headers.set("Cache-Control", "no-store, max-age=0");
   response.headers.set("Vary", "Cookie");
 
