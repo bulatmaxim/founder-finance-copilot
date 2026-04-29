@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { Toast, type ToastMessage, type ToastType } from "@/components/Toast";
+import { SmartUploadAssistant } from "@/components/SmartUploadAssistant";
 import { sampleCompany } from "@/data/sampleCompany";
 import {
   bankTransactionsSampleCsv,
@@ -164,6 +165,10 @@ export default function UploadsPage() {
     ) as LoadedAtByKind,
   );
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const smartUploadMonth = useMemo(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
+  }, []);
 
   const notify = useCallback(
     (type: ToastType, title: string, detail?: string) => {
@@ -348,6 +353,18 @@ export default function UploadsPage() {
           for development.
         </p>
       </div>
+
+      <SmartUploadAssistant
+        reportingMonth={smartUploadMonth}
+        onNotify={notify}
+        onComplete={async () => {
+          notify(
+            "success",
+            "Smart Upload staged for review.",
+            "Open Data Room or Account Mapping to review staged rows before approval.",
+          );
+        }}
+      />
 
       <DataSourceSummary rows={dataSourceRows} />
 

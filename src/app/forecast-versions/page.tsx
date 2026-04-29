@@ -85,7 +85,11 @@ export default function ForecastVersionsPage() {
     try {
       const loaded = await loadForecastVersionsForDisplay();
       setVersions(loaded);
-      setSelectedVersionIdState((current) => current || loaded[0]?.id || "");
+      setSelectedVersionIdState((current) =>
+        current && loaded.some((version) => version.id === current)
+          ? current
+          : loaded[0]?.id || "",
+      );
     } catch (error) {
       console.error("Forecast versions load failed", error);
       notify(
@@ -192,7 +196,7 @@ export default function ForecastVersionsPage() {
         "success",
         "Forecast version created.",
         form.actualsThroughMonth
-          ? "Approved Data Room actuals were used where available; remaining months use the selected source or placeholder assumptions."
+          ? "Approved Data Room actuals were used where available. Expected actual months without approved data are labeled Preliminary and use run-rate, budget, or prior forecast placeholders."
           : form.includeNextYear
             ? "Current and next-year future months use the selected source or placeholder assumptions."
             : "Future months use the selected source or placeholder assumptions.",
@@ -234,6 +238,25 @@ export default function ForecastVersionsPage() {
     setSelectedVersionIdState(id);
     notify("success", "Forecast version selected for reporting.");
   }
+
+  const handleForecastSaved = useCallback(
+    async (title: string, detail?: string) => {
+      notify("success", title, detail);
+      await loadVersions();
+    },
+    [loadVersions, notify],
+  );
+
+  const handleForecastError = useCallback(
+    (title: string, error: unknown) => {
+      notify(
+        "error",
+        title,
+        error instanceof Error ? error.message : "Try again.",
+      );
+    },
+    [notify],
+  );
 
   return (
     <section className="space-y-8">
@@ -452,31 +475,13 @@ export default function ForecastVersionsPage() {
         <>
           <ForecastDriversSection
             version={selectedVersion}
-            onSaved={async (title, detail) => {
-              notify("success", title, detail);
-              await loadVersions();
-            }}
-            onError={(title, error) =>
-              notify(
-                "error",
-                title,
-                error instanceof Error ? error.message : "Try again.",
-              )
-            }
+            onSaved={handleForecastSaved}
+            onError={handleForecastError}
           />
           <ForecastGridWorkspace
             version={selectedVersion}
-            onSaved={async (title, detail) => {
-              notify("success", title, detail);
-              await loadVersions();
-            }}
-            onError={(title, error) =>
-              notify(
-                "error",
-                title,
-                error instanceof Error ? error.message : "Try again.",
-              )
-            }
+            onSaved={handleForecastSaved}
+            onError={handleForecastError}
           />
         </>
       ) : null}
@@ -729,6 +734,7 @@ function ForecastVersionTable({
               <th className="px-4 py-3 font-medium">Fiscal year</th>
               <th className="px-4 py-3 font-medium">Version type</th>
               <th className="px-4 py-3 font-medium">Actual months</th>
+              <th className="px-4 py-3 font-medium">Preliminary months</th>
               <th className="px-4 py-3 font-medium">Forecast months</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Created date</th>
@@ -748,6 +754,7 @@ function ForecastVersionTable({
                 <td className="px-4 py-4">{version.fiscal_year}</td>
                 <td className="px-4 py-4">{version.version_type}</td>
                 <td className="px-4 py-4">{version.actualMonths}</td>
+                <td className="px-4 py-4">{version.preliminaryMonths}</td>
                 <td className="px-4 py-4">{version.forecastMonths}</td>
                 <td className="px-4 py-4">
                   <select

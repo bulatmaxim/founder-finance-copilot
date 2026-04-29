@@ -34,7 +34,7 @@ export type ForecastVersionStatus =
   | "Published"
   | "Archived";
 
-export type ForecastRowType = "Actual" | "Forecast" | "Budget";
+export type ForecastRowType = "Actual" | "Forecast" | "Budget" | "Preliminary";
 
 export type ForecastVersionRecord = {
   id: string;
@@ -70,6 +70,7 @@ export type ForecastVersionWithRows = ForecastVersionRecord & {
   rows: ForecastVersionRowRecord[];
   periods: ForecastMonth[];
   actualMonths: number;
+  preliminaryMonths: number;
   forecastMonths: number;
 };
 
@@ -203,7 +204,10 @@ export async function loadForecastVersionDetails(id: string): Promise<ForecastVe
     rows: normalizedRows,
     periods,
     actualMonths: countMonthsByType(normalizedRows, "Actual"),
-    forecastMonths: countMonthsByType(normalizedRows, "Forecast"),
+    preliminaryMonths: countMonthsByType(normalizedRows, "Preliminary"),
+    forecastMonths:
+      countMonthsByType(normalizedRows, "Forecast") +
+      countMonthsByType(normalizedRows, "Budget"),
   };
 }
 
@@ -334,7 +338,8 @@ export async function updateForecastVersionMonthRows({
       .eq("forecast_version_id", forecastVersionId)
       .eq("month", month)
       .eq("category", category)
-      .neq("row_type", "Actual");
+      .neq("row_type", "Actual")
+      .neq("row_type", "Preliminary");
 
     if (error) {
       throw new Error(`Forecast row update failed: ${error.message}`);
@@ -396,7 +401,7 @@ export function forecastVersionToDisplayVersion(
     id: version.id,
     name: version.name,
     actualMonths: version.actualMonths,
-    description: `${version.version_type} - ${version.actualMonths} actualized month${version.actualMonths === 1 ? "" : "s"} + ${version.forecastMonths} forecast month${version.forecastMonths === 1 ? "" : "s"}.`,
+    description: `${version.version_type} - ${version.actualMonths} actualized month${version.actualMonths === 1 ? "" : "s"} + ${version.preliminaryMonths} preliminary month${version.preliminaryMonths === 1 ? "" : "s"} + ${version.forecastMonths} forecast month${version.forecastMonths === 1 ? "" : "s"}.`,
     months: version.periods,
   };
 }
@@ -426,7 +431,9 @@ export function rowsToForecastMonths(rows: ForecastVersionRowRecord[]): Forecast
       const runwayMonths = cashBalance > 0 && netBurn > 0 ? cashBalance / netBurn : 99;
       const rowType = monthRows.some((row) => row.row_type === "Actual")
         ? "Actual"
-        : "Forecast";
+        : monthRows.some((row) => row.row_type === "Preliminary")
+          ? "Preliminary"
+          : "Forecast";
 
       return {
         month: dateToDisplayMonth(month),
@@ -501,25 +508,49 @@ async function buildForecastRows({
   sourceLabel?: string;
 }) {
   const fiscalMonths = getFiscalMonthOptions(fiscalYear).map((option) => option.value);
-  const [sourceRows, approvedActualPeriods] = await Promise.all([
+  const [sourceResult, approvedActualPeriods] = await Promise.all([
     loadSourceRows(sourceVersionId, fiscalYear),
     loadApprovedActualPeriods(actualsThroughMonth),
   ]);
+  const sourceRows = sourceResult.periods;
   const rows: Record<string, unknown>[] = [];
 
   fiscalMonths.forEach((month) => {
     const actualPeriod = approvedActualPeriods.get(month);
     const shouldActualize = Boolean(actualsThroughMonth && month <= actualsThroughMonth);
-    const sourcePeriod =
-      sourceRows.get(month) ??
-      samplePeriodForMonth(month, versionType === "Budget" ? "budget" : "latest");
-    const period = shouldActualize && actualPeriod ? actualPeriod : sourcePeriod;
-    const rowType: ForecastRowType =
-      versionType === "Budget"
-        ? "Budget"
-        : shouldActualize && actualPeriod
-          ? "Actual"
+    const expectedActualMissing = shouldActualize && !actualPeriod;
+    const fallback = expectedActualMissing
+      ? preliminaryFallbackForMonth({
+          month,
+          fiscalMonths,
+          approvedActualPeriods,
+          sourceRows,
+          sourceKind: sourceResult.kind,
+          versionType,
+        })
+      : forecastFallbackForMonth({
+          month,
+          sourceRows,
+          sourceKind: sourceResult.kind,
+          versionType,
+          sourceLabel,
+        });
+    const period = shouldActualize && actualPeriod ? actualPeriod : fallback.period;
+    const rowType: ForecastRowType = versionType === "Budget"
+      ? "Budget"
+      : shouldActualize && actualPeriod
+        ? "Actual"
+        : expectedActualMissing
+          ? "Preliminary"
           : "Forecast";
+    const rowSource =
+      rowType === "Actual"
+        ? "Approved Data Room actuals"
+        : rowType === "Preliminary"
+          ? fallback.source
+          : sourceLabel
+            ? sourceLabel
+            : fallback.source;
 
     metricCategories.forEach((category) => {
       rows.push({
@@ -530,14 +561,7 @@ async function buildForecastRows({
         category,
         amount: amountForPeriod(period, category),
         row_type: rowType,
-        source:
-          rowType === "Actual"
-            ? "Approved Data Room actuals"
-            : sourceLabel
-              ? sourceLabel
-            : sourceVersionId
-              ? "Source forecast version"
-              : "Placeholder forecast assumptions",
+        source: rowSource,
         is_locked: rowType === "Actual",
       });
     });
@@ -586,18 +610,111 @@ async function loadSourceRows(sourceVersionId: string | undefined, fiscalYear: n
     const source = await loadForecastVersionDetails(sourceVersionId);
 
     if (source) {
-      return new Map(
-        source.periods.map((period) => [displayMonthToDate(period.month), period]),
-      );
+      return {
+        kind: "priorForecast" as const,
+        periods: new Map(
+          source.periods.map((period) => [displayMonthToDate(period.month), period]),
+        ),
+      };
     }
   }
 
-  return new Map(
-    getFiscalMonthOptions(fiscalYear).map((option) => [
-      option.value,
-      samplePeriodForMonth(option.value, "budget"),
-    ]),
-  );
+  return {
+    kind: "budgetBaseline" as const,
+    periods: new Map(
+      getFiscalMonthOptions(fiscalYear).map((option) => [
+        option.value,
+        samplePeriodForMonth(option.value, "budget"),
+      ]),
+    ),
+  };
+}
+
+function preliminaryFallbackForMonth({
+  month,
+  fiscalMonths,
+  approvedActualPeriods,
+  sourceRows,
+  sourceKind,
+  versionType,
+}: {
+  month: string;
+  fiscalMonths: string[];
+  approvedActualPeriods: Map<string, FinancialPeriod>;
+  sourceRows: Map<string, FinancialPeriod>;
+  sourceKind: "priorForecast" | "budgetBaseline";
+  versionType: ForecastVersionType;
+}) {
+  const latestActualMonth = [...approvedActualPeriods.keys()]
+    .filter((actualMonth) => actualMonth < month)
+    .sort()
+    .at(-1);
+
+  if (latestActualMonth) {
+    const period = approvedActualPeriods.get(latestActualMonth);
+
+    if (period) {
+      return {
+        period,
+        source: `${dateToDisplayMonth(latestActualMonth)} run-rate proxy`,
+      };
+    }
+  }
+
+  const sourcePeriod = sourceRows.get(month);
+
+  if (sourcePeriod) {
+    return {
+      period: sourcePeriod,
+      source: sourceKind === "priorForecast" ? "Prior Forecast" : "Budget Baseline",
+    };
+  }
+
+  const priorFiscalMonth = fiscalMonths
+    .filter((fiscalMonth) => fiscalMonth < month)
+    .sort()
+    .at(-1);
+  const priorPeriod = priorFiscalMonth ? sourceRows.get(priorFiscalMonth) : null;
+
+  if (priorPeriod) {
+    return {
+      period: priorPeriod,
+      source: sourceKind === "priorForecast" ? "Prior Forecast run-rate" : "Budget run-rate",
+    };
+  }
+
+  return {
+    period: samplePeriodForMonth(month, versionType === "Budget" ? "budget" : "latest"),
+    source: "Blank / placeholder estimate",
+  };
+}
+
+function forecastFallbackForMonth({
+  month,
+  sourceRows,
+  sourceKind,
+  versionType,
+  sourceLabel,
+}: {
+  month: string;
+  sourceRows: Map<string, FinancialPeriod>;
+  sourceKind: "priorForecast" | "budgetBaseline";
+  versionType: ForecastVersionType;
+  sourceLabel?: string;
+}) {
+  const sourcePeriod = sourceRows.get(month);
+
+  if (sourcePeriod) {
+    return {
+      period: sourcePeriod,
+      source: sourceLabel ?? (sourceKind === "priorForecast" ? "Prior Forecast" : "Budget Baseline"),
+    };
+  }
+
+  return {
+    period: samplePeriodForMonth(month, versionType === "Budget" ? "budget" : "latest"),
+    source: sourceLabel ?? "Blank / placeholder forecast",
+  };
 }
 
 function financialRowsToPeriod(

@@ -177,6 +177,7 @@ export async function POST(request: NextRequest) {
       closeResult,
       mappingsResult,
       driversResult,
+      unmappedRowsResult,
     ] = await Promise.all([
       supabase
         .from("forecast_versions")
@@ -225,6 +226,11 @@ export async function POST(request: NextRequest) {
         .select("driver_type, assumption_name, assumption_value, assumption_unit, notes")
         .eq("company_id", company.id)
         .eq("forecast_version_id", forecastVersionId),
+      supabase
+        .from("import_staged_rows")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", company.id)
+        .in("mapping_status", ["Unmapped", "Suggested"]),
     ]);
 
     if (versionResult.error || !versionResult.data) {
@@ -279,6 +285,7 @@ export async function POST(request: NextRequest) {
       cashRows: cashResult.data ?? [],
       monthlyCloseStatus: closeItems,
       accountMappings: mappingsResult.data ?? [],
+      unmappedImportRows: unmappedRowsResult.count ?? 0,
       forecastDriverAssumptions: driversResult.data ?? [],
       recommendationOptions: {
         includeNextYear,
@@ -297,7 +304,10 @@ export async function POST(request: NextRequest) {
             "You are a CFO-quality FP&A forecast reviewer for a founder-led company.",
             "Use only the JSON data provided by the app. Do not use external research.",
             "Create draft forecast recommendations only; never describe them as already applied.",
-            "Prefer future unlocked forecast months. Do not recommend changing actualized months unless the reason is a clear forecast-version override.",
+            "If accounts or departments are unmapped, warn that recommendations may be incomplete or misclassified.",
+            "Rows with row_type Actual are approved actuals and must not be changed.",
+            "Rows with row_type Preliminary are placeholders, not approved actuals; use them as context but do not treat them as closed actuals.",
+            "Recommend changes only for editable future Forecast or Budget rows unless the user explicitly allowed actual/preliminary overrides, which this request does not.",
             "Use raw line items when data supports it; otherwise use category-level rows.",
             "Keep recommendations practical, concise, and board-ready.",
             "Return strict JSON matching the schema.",

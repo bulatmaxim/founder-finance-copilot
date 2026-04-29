@@ -10,7 +10,7 @@ export type ForecastVersionId =
   | "downside"
   | "upside";
 
-export type ForecastPeriodType = "Actual" | "Forecast";
+export type ForecastPeriodType = "Actual" | "Forecast" | "Preliminary" | "Budget";
 
 export type ForecastMonth = ActualFinancialMonth & {
   periodType: ForecastPeriodType;

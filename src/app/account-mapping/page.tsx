@@ -3,28 +3,38 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Toast, type ToastMessage, type ToastType } from "@/components/Toast";
 import {
-  applySuggestedAccountMappings,
-  departments,
-  loadAccountMappingRows,
-  saveAccountMapping,
-  standardFpnaCategories,
-  summarizeAccountMappings,
-  type AccountMappingRow,
-  type AccountMappingStatus,
-} from "@/lib/accountMapping";
+  loadCompanyMappingWorkspace,
+  masterFpnaCategories,
+  saveCompanyAccount,
+  saveDepartment,
+  saveMappingRule,
+  type CompanyAccount,
+  type CompanyDepartment,
+  type CompanyMappingWorkspace,
+  type MappingRule,
+} from "@/lib/companyMapping";
+import { saveAccountMapping, type AccountMappingRow } from "@/lib/accountMapping";
 import { formatCurrency } from "@/lib/formatting";
-import { hydrateLocalDataFromSupabase } from "@/lib/supabase/hydrateLocalData";
 
-type Filter = "All" | "Unmapped" | "Suggested" | "Mapped" | "Needs Review" | "Ignored";
+type Tab = "Departments" | "Accounts / Line Items" | "Category Mapping" | "Unmapped Imports" | "Mapping Rules";
 
-const filters: Filter[] = ["All", "Unmapped", "Suggested", "Mapped", "Needs Review", "Ignored"];
+const tabs: Tab[] = [
+  "Departments",
+  "Accounts / Line Items",
+  "Category Mapping",
+  "Unmapped Imports",
+  "Mapping Rules",
+];
 
 export default function AccountMappingPage() {
-  const [rows, setRows] = useState<AccountMappingRow[]>([]);
-  const [activeFilter, setActiveFilter] = useState<Filter>("Unmapped");
-  const [search, setSearch] = useState("");
+  const [workspace, setWorkspace] = useState<CompanyMappingWorkspace>({
+    departments: [],
+    accounts: [],
+    rules: [],
+    unmappedImports: [],
+  });
+  const [activeTab, setActiveTab] = useState<Tab>("Departments");
   const [isLoading, setIsLoading] = useState(true);
-  const [isSavingAll, setIsSavingAll] = useState(false);
   const [savingKey, setSavingKey] = useState("");
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
@@ -32,16 +42,15 @@ export default function AccountMappingPage() {
     setToast({ id: Date.now(), type, title, detail });
   }, []);
 
-  const loadRows = useCallback(async () => {
+  const loadWorkspace = useCallback(async () => {
     setIsLoading(true);
-
     try {
-      setRows(await loadAccountMappingRows());
+      setWorkspace(await loadCompanyMappingWorkspace());
     } catch (error) {
-      console.error("Account mappings load failed", error);
+      console.error("Company mapping load failed", error);
       notify(
         "error",
-        "Account mappings could not be loaded.",
+        "Company Mapping could not be loaded.",
         error instanceof Error ? error.message : "Check Supabase setup.",
       );
     } finally {
@@ -51,445 +60,354 @@ export default function AccountMappingPage() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      void loadRows();
+      void loadWorkspace();
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, [loadRows]);
+  }, [loadWorkspace]);
 
-  const summary = useMemo(() => summarizeAccountMappings(rows), [rows]);
-  const filteredRows = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
+  const summary = useMemo(() => {
+    const mappedImports = workspace.unmappedImports.filter((row) => row.status === "Mapped").length;
+    const totalImports = workspace.unmappedImports.length;
+    return {
+      departments: workspace.departments.length,
+      accounts: workspace.accounts.length,
+      rules: workspace.rules.length,
+      unmapped: workspace.unmappedImports.filter((row) => row.status !== "Mapped").length,
+      completion: totalImports === 0 ? 100 : Math.round((mappedImports / totalImports) * 100),
+    };
+  }, [workspace]);
 
-    return rows.filter((row) => {
-      const matchesFilter =
-        activeFilter === "All" ||
-        row.status === (activeFilter === "Needs Review" ? "Needs review" : activeFilter);
-      const matchesSearch =
-        !normalizedSearch ||
-        row.rawAccountName.toLowerCase().includes(normalizedSearch);
-
-      return matchesFilter && matchesSearch;
-    });
-  }, [activeFilter, rows, search]);
-
-  function updateRow(rawAccountName: string, patch: Partial<AccountMappingRow>) {
-    setRows((current) =>
-      current.map((row) =>
-        row.rawAccountName === rawAccountName ? { ...row, ...patch } : row,
-      ),
-    );
-  }
-
-  async function handleSave(row: AccountMappingRow) {
-    setSavingKey(row.rawAccountName);
-
+  async function saveAndReload(label: string, action: () => Promise<void>) {
+    setSavingKey(label);
     try {
-      await saveAccountMapping({
-        rawAccountName: row.rawAccountName,
-        normalizedCategory:
-          row.status === "Ignored"
-            ? "Uncategorized"
-            : row.selectedCategory || row.suggestedCategory,
-        department: row.department,
-        statementType: row.sourceType,
-        status:
-          row.status === "Ignored"
-            ? "Ignored"
-            : row.selectedCategory || row.suggestedCategory
-              ? row.status === "Needs review"
-                ? "Needs review"
-                : "Mapped"
-              : "Unmapped",
-      });
-      await hydrateLocalDataFromSupabase();
-      await loadRows();
-      notify("success", "Mapping saved.");
+      await action();
+      await loadWorkspace();
+      notify("success", `${label} saved.`);
     } catch (error) {
-      console.error("Account mapping save failed", error);
-      notify(
-        "error",
-        "Mapping could not be saved.",
-        error instanceof Error ? error.message : "Try again.",
-      );
+      notify("error", `${label} could not be saved.`, error instanceof Error ? error.message : "Try again.");
     } finally {
       setSavingKey("");
-    }
-  }
-
-  async function handleApplySuggested() {
-    const savedMappingsToOverwrite = rows.filter(
-      (row) => row.id && row.status !== "Unmapped",
-    );
-
-    if (savedMappingsToOverwrite.length > 0) {
-      const confirmed = window.confirm(
-        `Apply suggested mappings to ${savedMappingsToOverwrite.length} saved mapping${savedMappingsToOverwrite.length === 1 ? "" : "s"} that are not currently unmapped? Existing selected categories may be overwritten.`,
-      );
-
-      if (!confirmed) {
-        return;
-      }
-    }
-
-    setIsSavingAll(true);
-
-    try {
-      await applySuggestedAccountMappings(rows);
-      await hydrateLocalDataFromSupabase();
-      await loadRows();
-      notify("success", "Suggested mappings applied.");
-    } catch (error) {
-      console.error("Suggested mappings failed", error);
-      notify(
-        "error",
-        "Suggested mappings could not be applied.",
-        error instanceof Error ? error.message : "Try again.",
-      );
-    } finally {
-      setIsSavingAll(false);
-    }
-  }
-
-  async function handleSaveAll() {
-    setIsSavingAll(true);
-
-    try {
-      for (const row of rows.filter((item) => item.selectedCategory)) {
-        await saveAccountMapping({
-          rawAccountName: row.rawAccountName,
-          normalizedCategory:
-            row.status === "Ignored" ? "Uncategorized" : row.selectedCategory,
-          department: row.department,
-          statementType: row.sourceType,
-          status:
-            row.status === "Ignored"
-              ? "Ignored"
-              : row.status === "Needs review"
-                ? "Needs review"
-                : "Mapped",
-        });
-      }
-
-      await hydrateLocalDataFromSupabase();
-      await loadRows();
-      notify("success", "All edited mappings saved.");
-    } catch (error) {
-      console.error("Save all mappings failed", error);
-      notify(
-        "error",
-        "Mappings could not be saved.",
-        error instanceof Error ? error.message : "Try again.",
-      );
-    } finally {
-      setIsSavingAll(false);
     }
   }
 
   return (
     <section className="space-y-8">
       <Toast message={toast} onClose={() => setToast(null)} />
-
-      <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <p className="text-sm font-medium uppercase tracking-[0.12em] text-neutral-500">
-            Account Mapping
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-            Account Mapping
-          </h1>
-          <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
-            Map uploaded accounting lines into clean FP&A categories for
-            reporting, variance analysis, and CFO insights.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={isSavingAll || rows.length === 0}
-            onClick={() => void handleApplySuggested()}
-            className="h-10 rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-950 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-400"
-          >
-            Apply suggested mappings
-          </button>
-          <button
-            type="button"
-            disabled={isSavingAll || rows.length === 0}
-            onClick={() => void handleSaveAll()}
-            className="h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
-          >
-            {isSavingAll ? "Saving..." : "Save all"}
-          </button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <SummaryCard label="Total accounts" value={summary.totalAccounts} />
-        <SummaryCard label="Mapped accounts" value={summary.mappedAccounts} />
-        <SummaryCard label="Suggested" value={summary.suggestedAccounts} />
-        <SummaryCard label="Unmapped accounts" value={summary.unmappedAccounts} />
-        <SummaryCard label="Ignored" value={summary.ignoredAccounts} />
-        <SummaryCard label="Needs review" value={summary.needsReview} />
-      </div>
-
-      <section className="premium-card rounded-2xl p-5">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+      <div className="premium-card rounded-3xl p-6">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h2 className="text-base font-semibold text-[color:var(--text-strong)]">
-              Mapping Completeness
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-[color:var(--text-muted)]">
-              Mapping required before this data can be fully used in reporting.
-              Suggested mappings still need to be saved.
+            <p className="text-sm font-medium uppercase tracking-[0.18em] text-sky-200/70">
+              Company Mapping
+            </p>
+            <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[color:var(--text-strong)]">
+              Company Mapping
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-[color:var(--text-muted)]">
+              Define departments, accounts, codes, aliases, and FP&A mappings so
+              uploads, forecasts, AI, and reports understand company-specific data.
             </p>
           </div>
-          <div className="min-w-56">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-medium text-[color:var(--text-soft)]">
-                Completion
-              </span>
-              <span className="font-semibold text-[color:var(--text-strong)]">
-                {summary.completionPercent}%
-              </span>
-            </div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[color:var(--surface-3)]">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-sky-300 to-cyan-500"
-                style={{ width: `${summary.completionPercent}%` }}
-              />
-            </div>
-          </div>
         </div>
-      </section>
+      </div>
 
-      <section className="rounded-md border border-neutral-200 bg-white p-5">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap gap-2">
-            {filters.map((filter) => (
-              <button
-                key={filter}
-                type="button"
-                onClick={() => setActiveFilter(filter)}
-                className={`h-9 rounded-md border px-3 text-sm font-medium ${
-                  activeFilter === filter
-                    ? "border-neutral-950 bg-neutral-950 text-white"
-                    : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
-                }`}
-              >
-                {filter}
-              </button>
-            ))}
-          </div>
-          <label className="block xl:w-80">
-            <span className="sr-only">Search raw account name</span>
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search raw account name"
-              className="h-10 w-full rounded-md border border-neutral-300 px-3 text-sm outline-none focus:border-neutral-950"
-            />
-          </label>
+      <div className="grid gap-4 md:grid-cols-5">
+        <SummaryCard label="Departments" value={summary.departments} />
+        <SummaryCard label="Accounts" value={summary.accounts} />
+        <SummaryCard label="Rules" value={summary.rules} />
+        <SummaryCard label="Unmapped Imports" value={summary.unmapped} />
+        <SummaryCard label="Completion" value={`${summary.completion}%`} />
+      </div>
+
+      <section className="premium-card rounded-2xl p-4">
+        <div className="flex flex-wrap gap-2">
+          {tabs.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-xl border px-3 py-2 text-sm font-medium ${
+                activeTab === tab
+                  ? "border-sky-300/40 bg-sky-300/10 text-[color:var(--text-strong)]"
+                  : "border-white/10 text-[color:var(--text-muted)]"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
       </section>
 
       {isLoading ? (
-        <section className="rounded-md border border-neutral-200 bg-white p-6">
-          <p className="text-sm text-neutral-500">Loading account mappings...</p>
+        <section className="premium-card rounded-2xl p-6">
+          <div className="premium-skeleton h-24 rounded-2xl" />
         </section>
       ) : (
-        <MappingTable
-          rows={filteredRows}
-          savingKey={savingKey}
-          onUpdate={updateRow}
-          onSave={(row) => void handleSave(row)}
-        />
+        <>
+          {activeTab === "Departments" ? (
+            <DepartmentsTab
+              rows={workspace.departments}
+              isSaving={Boolean(savingKey)}
+              onSave={(row) => saveAndReload("Department", () => saveDepartment(row))}
+            />
+          ) : null}
+          {activeTab === "Accounts / Line Items" || activeTab === "Category Mapping" ? (
+            <AccountsTab
+              rows={workspace.accounts}
+              departments={workspace.departments}
+              categoryOnly={activeTab === "Category Mapping"}
+              isSaving={Boolean(savingKey)}
+              onSave={(row) => saveAndReload("Account", () => saveCompanyAccount(row))}
+            />
+          ) : null}
+          {activeTab === "Unmapped Imports" ? (
+            <UnmappedImportsTab
+              rows={workspace.unmappedImports}
+              onSave={(row) =>
+                saveAndReload("Import mapping", () =>
+                  saveAccountMapping({
+                    rawAccountName: row.rawAccountName,
+                    normalizedCategory: row.selectedCategory || row.suggestedCategory,
+                    department: row.department,
+                    statementType: row.sourceType,
+                    status: "Mapped",
+                  }),
+                )
+              }
+            />
+          ) : null}
+          {activeTab === "Mapping Rules" ? (
+            <RulesTab
+              rows={workspace.rules}
+              accounts={workspace.accounts}
+              departments={workspace.departments}
+              onSave={(row) => saveAndReload("Mapping rule", () => saveMappingRule(row))}
+            />
+          ) : null}
+        </>
       )}
-
-      <section className="rounded-md border border-neutral-200 bg-white p-5">
-        <h2 className="text-base font-semibold">Standard FP&A Categories</h2>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {standardFpnaCategories.map((category) => (
-            <div
-              key={category}
-              className="rounded-md border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-700"
-            >
-              {category}
-            </div>
-          ))}
-        </div>
-      </section>
     </section>
   );
 }
 
-function MappingTable({
-  rows,
-  savingKey,
-  onUpdate,
-  onSave,
-}: {
+function DepartmentsTab({ rows, isSaving, onSave }: {
+  rows: CompanyDepartment[];
+  isSaving: boolean;
+  onSave: (row: Partial<CompanyDepartment>) => void;
+}) {
+  const [drafts, setDrafts] = useState<Partial<CompanyDepartment>[]>(rows);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDrafts(rows), 0);
+    return () => window.clearTimeout(timeout);
+  }, [rows]);
+
+  return (
+    <EditorTable
+      title="Departments"
+      description="Create company departments and department codes used by uploads and forecasts."
+      onAdd={() => setDrafts((current) => [...current, { name: "", code: "", function: "", notes: "", is_active: true }])}
+    >
+      <thead><tr><Th>Name</Th><Th>Code</Th><Th>Function</Th><Th>Notes</Th><Th>Status</Th><Th>Action</Th></tr></thead>
+      <tbody>
+        {drafts.map((row, index) => (
+          <tr key={row.id ?? index} className="border-b border-white/10">
+            <Td><Input value={row.name ?? ""} onChange={(name) => updateDraft(setDrafts, index, { name })} /></Td>
+            <Td><Input value={row.code ?? ""} onChange={(code) => updateDraft(setDrafts, index, { code })} /></Td>
+            <Td><Input value={row.function ?? ""} onChange={(value) => updateDraft(setDrafts, index, { function: value })} /></Td>
+            <Td><Input value={row.notes ?? ""} onChange={(notes) => updateDraft(setDrafts, index, { notes })} /></Td>
+            <Td><Toggle active={row.is_active ?? true} onChange={(is_active) => updateDraft(setDrafts, index, { is_active })} /></Td>
+            <Td><SaveButton disabled={isSaving || !row.name} onClick={() => onSave(row)} /></Td>
+          </tr>
+        ))}
+      </tbody>
+    </EditorTable>
+  );
+}
+
+function AccountsTab({ rows, departments, categoryOnly, isSaving, onSave }: {
+  rows: CompanyAccount[];
+  departments: CompanyDepartment[];
+  categoryOnly: boolean;
+  isSaving: boolean;
+  onSave: (row: Partial<CompanyAccount>) => void;
+}) {
+  const [drafts, setDrafts] = useState<Partial<CompanyAccount>[]>(rows);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDrafts(rows), 0);
+    return () => window.clearTimeout(timeout);
+  }, [rows]);
+
+  return (
+    <EditorTable
+      title={categoryOnly ? "Category Mapping" : "Accounts / Line Items"}
+      description="Map company-specific accounts, codes, and uploaded aliases into standardized FP&A categories."
+      onAdd={() => setDrafts((current) => [...current, { account_name: "", account_code: "", uploaded_alias: "", normalized_category: "", statement_type: "P&L", is_active: true }])}
+    >
+      <thead><tr><Th>Account Name</Th><Th>Code</Th>{!categoryOnly ? <Th>Alias / Uploaded Name</Th> : null}<Th>Department</Th><Th>FP&A Category</Th><Th>Statement Type</Th><Th>Status</Th><Th>Action</Th></tr></thead>
+      <tbody>
+        {drafts.map((row, index) => (
+          <tr key={row.id ?? index} className="border-b border-white/10">
+            <Td><Input value={row.account_name ?? ""} onChange={(account_name) => updateDraft(setDrafts, index, { account_name })} /></Td>
+            <Td><Input value={row.account_code ?? ""} onChange={(account_code) => updateDraft(setDrafts, index, { account_code })} /></Td>
+            {!categoryOnly ? <Td><Input value={row.uploaded_alias ?? ""} onChange={(uploaded_alias) => updateDraft(setDrafts, index, { uploaded_alias })} /></Td> : null}
+            <Td>
+              <Select value={row.department_id ?? ""} onChange={(department_id) => updateDraft(setDrafts, index, { department_id })}>
+                <option value="">None</option>
+                {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+              </Select>
+            </Td>
+            <Td><CategorySelect value={row.normalized_category ?? ""} onChange={(normalized_category) => updateDraft(setDrafts, index, { normalized_category })} /></Td>
+            <Td><Input value={row.statement_type ?? ""} onChange={(statement_type) => updateDraft(setDrafts, index, { statement_type })} /></Td>
+            <Td><Toggle active={row.is_active ?? true} onChange={(is_active) => updateDraft(setDrafts, index, { is_active })} /></Td>
+            <Td><SaveButton disabled={isSaving || !row.account_name} onClick={() => onSave(row)} /></Td>
+          </tr>
+        ))}
+      </tbody>
+    </EditorTable>
+  );
+}
+
+function UnmappedImportsTab({ rows, onSave }: {
   rows: AccountMappingRow[];
-  savingKey: string;
-  onUpdate: (rawAccountName: string, patch: Partial<AccountMappingRow>) => void;
   onSave: (row: AccountMappingRow) => void;
 }) {
-  if (rows.length === 0) {
-    return (
-      <section className="rounded-md border border-neutral-200 bg-white p-6">
-        <p className="text-sm text-neutral-500">
-          No accounts match this filter. Approved Data Room uploads will surface
-          new raw accounts here automatically.
-        </p>
-      </section>
-    );
-  }
+  const [drafts, setDrafts] = useState(rows);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDrafts(rows), 0);
+    return () => window.clearTimeout(timeout);
+  }, [rows]);
 
   return (
-    <section className="overflow-hidden rounded-md border border-neutral-200 bg-white">
-      <div className="border-b border-neutral-200 px-5 py-4">
-        <h2 className="text-base font-semibold">Account Mapping Queue</h2>
-        <p className="mt-1 text-sm text-neutral-500">
-          Preserve raw account names while applying normalized FP&A categories
-          to reporting rollups.
-        </p>
-      </div>
+    <EditorTable
+      title="Unmapped Imports"
+      description="Accounts and codes found in uploaded or staged data that do not yet have a trusted company mapping."
+    >
+      <thead><tr><Th>Raw Uploaded Value</Th><Th>Source</Th><Th>Total Amount</Th><Th>Rows</Th><Th>First Seen</Th><Th>Latest Seen</Th><Th>Suggested Mapping</Th><Th>Save Mapping</Th></tr></thead>
+      <tbody>
+        {drafts.length === 0 ? <tr><td colSpan={8} className="px-4 py-10 text-center text-[color:var(--text-muted)]">No unmapped imports right now.</td></tr> : null}
+        {drafts.map((row, index) => (
+          <tr key={row.rawAccountName} className="border-b border-white/10">
+            <Td>{row.rawAccountName}</Td>
+            <Td>{row.sourceType}</Td>
+            <Td>{formatCurrency(row.totalAmount)}</Td>
+            <Td>{row.rowCount}</Td>
+            <Td>{row.firstSeenDate ?? "-"}</Td>
+            <Td>{row.latestSeenDate ?? "-"}</Td>
+            <Td><CategorySelect value={row.selectedCategory || row.suggestedCategory} onChange={(selectedCategory) => setDrafts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, selectedCategory } : item))} /></Td>
+            <Td><SaveButton disabled={false} onClick={() => onSave(drafts[index])} /></Td>
+          </tr>
+        ))}
+      </tbody>
+    </EditorTable>
+  );
+}
 
+function RulesTab({ rows, accounts, departments, onSave }: {
+  rows: MappingRule[];
+  accounts: CompanyAccount[];
+  departments: CompanyDepartment[];
+  onSave: (row: Partial<MappingRule>) => void;
+}) {
+  const [drafts, setDrafts] = useState<Partial<MappingRule>[]>(rows);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDrafts(rows), 0);
+    return () => window.clearTimeout(timeout);
+  }, [rows]);
+
+  return (
+    <EditorTable
+      title="Mapping Rules"
+      description="Simple rules for uploaded account codes, department codes, and raw names."
+      onAdd={() => setDrafts((current) => [...current, { rule_type: "raw_name_equals", match_value: "", priority: 100, is_active: true }])}
+    >
+      <thead><tr><Th>Rule Type</Th><Th>Match Value</Th><Th>Account</Th><Th>Department</Th><Th>Category</Th><Th>Priority</Th><Th>Status</Th><Th>Action</Th></tr></thead>
+      <tbody>
+        {drafts.map((row, index) => (
+          <tr key={row.id ?? index} className="border-b border-white/10">
+            <Td><Select value={row.rule_type ?? "raw_name_equals"} onChange={(rule_type) => updateDraft(setDrafts, index, { rule_type })}><option value="raw_name_equals">Raw name equals</option><option value="department_equals">Department/code equals</option><option value="raw_name_contains">Raw name contains</option></Select></Td>
+            <Td><Input value={row.match_value ?? ""} onChange={(match_value) => updateDraft(setDrafts, index, { match_value })} /></Td>
+            <Td><Select value={row.mapped_account_id ?? ""} onChange={(mapped_account_id) => updateDraft(setDrafts, index, { mapped_account_id })}><option value="">None</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.account_name}</option>)}</Select></Td>
+            <Td><Select value={row.mapped_department_id ?? ""} onChange={(mapped_department_id) => updateDraft(setDrafts, index, { mapped_department_id })}><option value="">None</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</Select></Td>
+            <Td><CategorySelect value={row.normalized_category ?? ""} onChange={(normalized_category) => updateDraft(setDrafts, index, { normalized_category })} /></Td>
+            <Td><Input value={String(row.priority ?? 100)} onChange={(priority) => updateDraft(setDrafts, index, { priority: Number(priority) || 100 })} /></Td>
+            <Td><Toggle active={row.is_active ?? true} onChange={(is_active) => updateDraft(setDrafts, index, { is_active })} /></Td>
+            <Td><SaveButton disabled={!row.match_value} onClick={() => onSave(row)} /></Td>
+          </tr>
+        ))}
+      </tbody>
+    </EditorTable>
+  );
+}
+
+function EditorTable({ title, description, children, onAdd }: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+  onAdd?: () => void;
+}) {
+  return (
+    <section className="premium-card overflow-hidden rounded-2xl">
+      <div className="premium-panel-header flex items-start justify-between gap-4 px-5 py-4">
+        <div>
+          <h2 className="text-base font-semibold text-[color:var(--text-strong)]">{title}</h2>
+          <p className="mt-1 text-sm text-[color:var(--text-muted)]">{description}</p>
+        </div>
+        {onAdd ? <button type="button" onClick={onAdd} className="premium-pill h-10 rounded-xl px-4 text-sm font-medium">Add</button> : null}
+      </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1560px] text-left text-sm">
-          <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-600">
-            <tr>
-              <th className="px-4 py-3 font-medium">Raw account name</th>
-              <th className="px-4 py-3 font-medium">Source</th>
-              <th className="px-4 py-3 font-medium">First seen</th>
-              <th className="px-4 py-3 font-medium">Latest seen</th>
-              <th className="px-4 py-3 font-medium">Rows</th>
-              <th className="px-4 py-3 font-medium">Total amount</th>
-              <th className="px-4 py-3 font-medium">Suggested FP&A category</th>
-              <th className="px-4 py-3 font-medium">Selected FP&A category</th>
-              <th className="px-4 py-3 font-medium">Department</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Last updated</th>
-              <th className="px-4 py-3 font-medium">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.rawAccountName} className="border-b border-neutral-100 align-top">
-                <td className="px-4 py-4 font-medium text-neutral-950">
-                  {row.rawAccountName}
-                </td>
-                <td className="px-4 py-4 text-neutral-700">{row.sourceType}</td>
-                <td className="px-4 py-4 text-neutral-600">
-                  {formatDate(row.firstSeenDate)}
-                </td>
-                <td className="px-4 py-4 text-neutral-600">
-                  {formatDate(row.latestSeenDate)}
-                </td>
-                <td className="px-4 py-4 text-neutral-700">{row.rowCount}</td>
-                <td className="px-4 py-4 text-neutral-700">
-                  {formatCurrency(row.totalAmount)}
-                </td>
-                <td className="px-4 py-4 text-neutral-700">
-                  {row.suggestedCategory}
-                </td>
-                <td className="px-4 py-4">
-                  <select
-                    value={row.selectedCategory || row.suggestedCategory}
-                    onChange={(event) =>
-                      onUpdate(row.rawAccountName, {
-                        selectedCategory: event.target.value,
-                        status:
-                          event.target.value === "Uncategorized"
-                            ? "Needs review"
-                            : "Mapped",
-                      })
-                    }
-                    className="h-10 w-64 rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none focus:border-neutral-950"
-                  >
-                    {standardFpnaCategories.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="px-4 py-4">
-                  <select
-                    value={row.department}
-                    onChange={(event) =>
-                      onUpdate(row.rawAccountName, {
-                        department: event.target.value,
-                      })
-                    }
-                    className="h-10 w-52 rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none focus:border-neutral-950"
-                  >
-                    {departments.map((department) => (
-                      <option key={department || "none"} value={department}>
-                        {department || "None"}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="px-4 py-4">
-                  <select
-                    value={row.status}
-                    onChange={(event) =>
-                      onUpdate(row.rawAccountName, {
-                        status: event.target.value as AccountMappingStatus,
-                      })
-                    }
-                    className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none focus:border-neutral-950"
-                  >
-                    <option value="Unmapped">Unmapped</option>
-                    <option value="Suggested">Suggested</option>
-                    <option value="Mapped">Mapped</option>
-                    <option value="Needs review">Needs review</option>
-                    <option value="Ignored">Ignored</option>
-                  </select>
-                </td>
-                <td className="px-4 py-4 text-neutral-600">
-                  {formatDate(row.lastUpdated)}
-                </td>
-                <td className="px-4 py-4">
-                  <button
-                    type="button"
-                    disabled={savingKey === row.rawAccountName}
-                    onClick={() => onSave(row)}
-                    className="h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
-                  >
-                    {savingKey === row.rawAccountName ? "Saving..." : "Save"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <table className="w-full min-w-[1100px] text-left text-sm">{children}</table>
       </div>
     </section>
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: number }) {
+function SummaryCard({ label, value }: { label: string; value: string | number }) {
   return (
-    <article className="rounded-md border border-neutral-200 bg-white p-5">
-      <p className="text-sm font-medium text-neutral-500">{label}</p>
-      <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
+    <article className="premium-card rounded-2xl p-5">
+      <p className="text-sm font-medium text-[color:var(--text-muted)]">{label}</p>
+      <p className="mt-3 text-2xl font-semibold tracking-tight text-[color:var(--text-strong)]">{value}</p>
     </article>
   );
 }
 
-function formatDate(value: string | null) {
-  if (!value) {
-    return "Not saved";
-  }
+function Th({ children }: { children: React.ReactNode }) {
+  return <th className="px-4 py-3 font-medium">{children}</th>;
+}
 
-  const date = new Date(value);
+function Td({ children }: { children: React.ReactNode }) {
+  return <td className="px-4 py-3 align-top">{children}</td>;
+}
 
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
+function Input({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return <input value={value} onChange={(event) => onChange(event.target.value)} className="h-10 min-w-36 rounded-xl border px-3 text-sm" />;
+}
+
+function Select({ value, onChange, children }: { value: string; onChange: (value: string) => void; children: React.ReactNode }) {
+  return <select value={value} onChange={(event) => onChange(event.target.value)} className="h-10 min-w-44 rounded-xl border px-3 text-sm">{children}</select>;
+}
+
+function CategorySelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <Select value={value} onChange={onChange}>
+      <option value="">Select category</option>
+      {[...new Set(masterFpnaCategories)].map((category) => <option key={category} value={category}>{category}</option>)}
+    </Select>
+  );
+}
+
+function Toggle({ active, onChange }: { active: boolean; onChange: (active: boolean) => void }) {
+  return (
+    <label className="inline-flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={active} onChange={(event) => onChange(event.target.checked)} />
+      {active ? "Active" : "Inactive"}
+    </label>
+  );
+}
+
+function SaveButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
+  return <button type="button" disabled={disabled} onClick={onClick} className="h-10 rounded-xl bg-neutral-950 px-4 text-sm font-medium disabled:opacity-50">Save</button>;
+}
+
+function updateDraft<T>(setDrafts: React.Dispatch<React.SetStateAction<Partial<T>[]>>, index: number, patch: Partial<T>) {
+  setDrafts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
 }

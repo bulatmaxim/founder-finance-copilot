@@ -266,7 +266,8 @@ export async function applyForecastDriversToVersion({
         .eq("forecast_version_id", version.id)
         .eq("month", month.monthDate)
         .eq("category", category)
-        .neq("row_type", "Actual");
+        .neq("row_type", "Actual")
+        .neq("row_type", "Preliminary");
 
       if (error) {
         throw new Error(`Forecast driver apply failed: ${error.message}`);
@@ -292,13 +293,15 @@ export function buildForecastDriverPreview(
   const periods = rowsToForecastMonths(version.rows);
   let revenue = assumptions.startingMrr;
   let headcount = assumptions.currentHeadcount;
-  const unlockedPeriods = periods.filter((period) => period.periodType !== "Actual");
+  const unlockedPeriods = periods.filter(
+    (period) => period.periodType !== "Actual" && period.periodType !== "Preliminary",
+  );
   const hireRamp =
     unlockedPeriods.length > 0 ? assumptions.plannedHires / unlockedPeriods.length : 0;
 
   return periods.map((period) => {
     const monthDate = displayMonthToDate(period.month);
-    const isLocked = period.periodType === "Actual";
+    const isLocked = period.periodType === "Actual" || period.periodType === "Preliminary";
 
     if (isLocked) {
       revenue = period.revenue || revenue;

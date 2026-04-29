@@ -8,6 +8,7 @@ import {
   generateForecastRecommendationDraft,
   loadForecastNotifications,
   loadLatestForecastRecommendation,
+  saveForecastVersionCheckpoint,
   updateForecastRecommendationAssumptions,
   updateForecastRecommendationRow,
   updateForecastVersionCell,
@@ -243,7 +244,11 @@ export function ForecastGridWorkspace({ version, onSaved, onError }: Props) {
   }
 
   async function handleGenerateRecommendation(allowUnapprovedData = false) {
-    if (!allowUnapprovedData && version.actuals_through_month && version.actualMonths === 0) {
+    if (
+      !allowUnapprovedData &&
+      version.actuals_through_month &&
+      (version.actualMonths === 0 || version.preliminaryMonths > 0)
+    ) {
       const confirmed = window.confirm(
         "Some monthly close data is not approved. Forecast recommendations may be incomplete or unreliable. Would you like to proceed anyway?",
       );
@@ -397,6 +402,18 @@ export function ForecastGridWorkspace({ version, onSaved, onError }: Props) {
     }
   }
 
+  async function saveForecast() {
+    try {
+      await saveForecastVersionCheckpoint(version.id);
+      await onSaved(
+        "Forecast saved.",
+        "Current forecast rows, accepted AI changes, and driver assumptions are saved for this version.",
+      );
+    } catch (error) {
+      onError("Forecast could not be saved.", error);
+    }
+  }
+
   async function updateDriverChange(
     change: ForecastDriverRecommendation,
     patch: Partial<ForecastDriverRecommendation>,
@@ -466,11 +483,18 @@ export function ForecastGridWorkspace({ version, onSaved, onError }: Props) {
           </label>
           <button
             type="button"
+            onClick={() => void saveForecast()}
+            className="h-10 rounded-md border border-[var(--line-soft)] px-4 text-sm font-medium text-[var(--foreground)]"
+          >
+            Save Forecast
+          </button>
+          <button
+            type="button"
             disabled={isGenerating}
             onClick={() => void handleGenerateRecommendation(false)}
             className="h-10 rounded-md bg-[var(--foreground)] px-4 text-sm font-medium text-[var(--background)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isGenerating ? "Generating..." : "Generate AI Forecast Recommendation"}
+            {isGenerating ? "Generating..." : "Forecast with AI"}
           </button>
         </div>
       </div>
@@ -481,6 +505,8 @@ export function ForecastGridWorkspace({ version, onSaved, onError }: Props) {
           notifications={notifications}
           onDismiss={(id) => void dismissNotification(id)}
         />
+
+        <ForecastContextPanel version={version} />
 
         <div className="flex flex-wrap gap-2">
           {sectionConfigs.map((section) => (
@@ -541,6 +567,7 @@ export function ForecastGridWorkspace({ version, onSaved, onError }: Props) {
                             <ForecastAmountInput
                               value={recommendationRow ? Number(recommendationRow.suggested_amount ?? value) : value}
                               status={status}
+                              sourceNote={row?.source ?? null}
                               disabled={isDerived || savingCell === key}
                               isSaving={savingCell === key}
                               onDraftChange={(amount) => updateDraftCell(month.value, lineItem, amount)}
@@ -605,6 +632,7 @@ export function ForecastGridWorkspace({ version, onSaved, onError }: Props) {
 function ForecastAmountInput({
   value,
   status,
+  sourceNote,
   disabled,
   isSaving,
   onDraftChange,
@@ -612,6 +640,7 @@ function ForecastAmountInput({
 }: {
   value: number;
   status: string;
+  sourceNote: string | null;
   disabled: boolean;
   isSaving: boolean;
   onDraftChange: (amount: number) => void;
@@ -632,6 +661,8 @@ function ForecastAmountInput({
       ? "border-[var(--accent)] bg-[rgba(56,189,248,0.12)] text-[var(--foreground)]"
       : status === "Actual"
         ? "border-[var(--line-soft)] bg-[var(--surface-2)] text-[var(--text-muted)]"
+        : status === "Preliminary"
+          ? "border-[rgba(232,210,138,0.42)] bg-[rgba(232,210,138,0.12)] text-[var(--foreground)]"
         : status === "Manual Override"
           ? "border-[rgba(232,210,138,0.32)] bg-[rgba(113,63,18,0.16)] text-[var(--foreground)]"
           : "border-[var(--line-soft)] bg-[var(--surface-soft)] text-[var(--foreground)]"
@@ -657,11 +688,81 @@ function ForecastAmountInput({
           }
         }}
         className={className}
+        title={sourceNote ?? status}
       />
       <span className="rounded border border-[var(--line-soft)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]">
         {isSaving ? "Saving" : status}
       </span>
     </div>
+  );
+}
+
+function ForecastContextPanel({ version }: { version: ForecastVersionWithRows }) {
+  const actualMonths = uniqueMonthsByType(version.rows, "Actual");
+  const preliminaryMonths = uniqueMonthsByType(version.rows, "Preliminary");
+  const forecastMonths = uniqueMonthsByType(version.rows, "Forecast");
+  const budgetMonths = uniqueMonthsByType(version.rows, "Budget");
+  const latestActualMonth = actualMonths.at(-1) ?? null;
+  const latestSource =
+    version.rows.find((row) => row.row_type === "Preliminary")?.source ??
+    version.rows.find((row) => row.row_type === "Forecast")?.source ??
+    version.rows.find((row) => row.row_type === "Budget")?.source ??
+    version.rows.find((row) => row.row_type === "Actual")?.source ??
+    "Not available";
+  const nextYearIncluded = version.rows.some(
+    (row) => Number(row.month.slice(0, 4)) > version.fiscal_year,
+  );
+
+  return (
+    <section className="rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] p-4">
+      <div className="grid gap-3 lg:grid-cols-4">
+        <MiniPanel title="Forecast type" value={`${version.version_type} - FY${version.fiscal_year}`} />
+        <MiniPanel
+          title="Expected actuals"
+          value={
+            version.actuals_through_month
+              ? `Through ${dateToDisplayMonth(version.actuals_through_month)}`
+              : "None; all months are planned"
+          }
+        />
+        <MiniPanel
+          title="Approved actuals available"
+          value={latestActualMonth ? `Through ${dateToDisplayMonth(latestActualMonth)}` : "None found"}
+        />
+        <MiniPanel title="Latest data source" value={latestSource} />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+        <StatusLegend label="Actual" className="bg-[var(--surface-2)] text-[var(--text-muted)]" />
+        <StatusLegend label="Preliminary" className="bg-[rgba(232,210,138,0.12)] text-[var(--foreground)]" />
+        <StatusLegend label="Forecast" className="bg-[var(--surface-soft)] text-[var(--foreground)]" />
+        <StatusLegend label="AI Suggested" className="bg-[rgba(56,189,248,0.12)] text-[var(--foreground)]" />
+        <StatusLegend label="Manual Override" className="bg-[rgba(113,63,18,0.16)] text-[var(--foreground)]" />
+        <span className="rounded border border-[var(--line-soft)] px-2 py-1 text-[var(--text-muted)]">
+          {actualMonths.length} actual | {preliminaryMonths.length} preliminary |{" "}
+          {forecastMonths.length + budgetMonths.length} forecast/budget
+        </span>
+        {nextYearIncluded ? (
+          <span className="rounded border border-[var(--line-soft)] px-2 py-1 text-[var(--text-muted)]">
+            Next-year forecast impact included
+          </span>
+        ) : null}
+      </div>
+      {preliminaryMonths.length > 0 ? (
+        <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
+          {preliminaryMonths.map(dateToDisplayMonth).join(", ")} use placeholder
+          values such as latest approved run-rate, budget baseline, or prior
+          forecast until those monthly closes are approved.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function StatusLegend({ label, className }: { label: string; className: string }) {
+  return (
+    <span className={`rounded border border-[var(--line-soft)] px-2 py-1 font-medium ${className}`}>
+      {label}
+    </span>
   );
 }
 
@@ -969,11 +1070,12 @@ function ActualEditModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <section className="premium-card max-w-lg p-6">
-        <h3 className="text-lg font-semibold">Edit Approved Actuals?</h3>
+        <h3 className="text-lg font-semibold">Edit Actuals?</h3>
         <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
-          You are about to change actual financial data. Actuals should normally
-          be updated through the Data Room or Data Entry workflow. This change
-          may affect dashboards, CFO Briefs, forecasts, reports, and exported decks.
+          You are about to change actual financial data inside this forecast
+          version. Actuals should normally be updated through Data Room or Data
+          Entry. This edit will be treated as a forecast override and will not
+          rewrite the approved Data Room source data.
         </p>
         <div className="mt-4 rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] p-3 text-sm">
           <p><strong>Line item:</strong> {pending.lineItem}</p>
@@ -1037,6 +1139,7 @@ function statusForCell(
   if (recommendationRow) return "AI Suggested";
   if (row?.source?.toLowerCase().includes("manual override")) return "Manual Override";
   if (row?.row_type === "Actual" || row?.is_locked) return "Actual";
+  if (row?.row_type === "Preliminary") return "Preliminary";
   if (versionStatus === "Approved" || versionStatus === "Published") return "Approved";
   return row?.row_type ?? "Forecast";
 }
@@ -1117,15 +1220,27 @@ function buildComputedNotices(
     });
   }
 
+  if (version.preliminaryMonths > 0) {
+    notices.push({
+      title: "Preliminary months included",
+      message:
+        "Some expected actual months are not approved yet. Those cells use run-rate, budget, or prior forecast placeholders and are not treated as approved actuals.",
+    });
+  }
+
   if (!recommendation || recommendation.status === "Draft") {
     notices.push({
       title: "Forecast recommendation pending",
       message:
-        "Generate and apply a recommendation draft before using this forecast in board reporting.",
+        "Workflow: review actuals, edit forecast months, forecast with AI, apply accepted recommendations, then save the final forecast.",
     });
   }
 
   return notices;
+}
+
+function uniqueMonthsByType(rows: ForecastVersionRowRecord[], rowType: string) {
+  return [...new Set(rows.filter((row) => row.row_type === rowType).map((row) => row.month))].sort();
 }
 
 function cellKey(month: string, lineItem: string) {

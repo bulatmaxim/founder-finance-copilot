@@ -18,6 +18,7 @@ type MonthlyCloseChecklistProps = {
     status: Exclude<MonthlyCloseStatus, "Not uploaded">,
   ) => void;
   onRemove: (item: MonthlyCloseItem) => void;
+  reviewOnly?: boolean;
 };
 
 export function MonthlyCloseChecklist({
@@ -28,6 +29,7 @@ export function MonthlyCloseChecklist({
   onUpload,
   onStatusChange,
   onRemove,
+  reviewOnly = false,
 }: MonthlyCloseChecklistProps) {
   const itemByCategory = new Map(
     items.map((item) => [item.file_category, item]),
@@ -84,7 +86,7 @@ export function MonthlyCloseChecklist({
                     ? `&batchId=${encodeURIComponent(item.import_batch.id)}`
                     : ""
                 }`;
-                const manualHref = `/data-entry?month=${encodeURIComponent(reportingMonth)}&category=${encodeURIComponent(category.id)}&action=manual`;
+                const manualHref = `/data-entry?year=${encodeURIComponent(reportingMonth.slice(0, 4))}&category=${encodeURIComponent(category.id)}`;
 
                 return (
                   <tr key={category.id} className="border-b border-white/10 align-top">
@@ -128,28 +130,47 @@ export function MonthlyCloseChecklist({
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex flex-wrap gap-2">
-                        <label className="inline-flex h-9 cursor-pointer items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10">
-                          {isUploading
-                            ? "Uploading..."
-                            : hasUploadedFile
-                              ? "Replace file"
-                              : "Upload"}
-                          <input
-                            type="file"
-                            accept=".csv,text/csv"
-                            disabled={isUploading || isSaving}
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
+                        {reviewOnly ? (
+                          item.status === "Not uploaded" ? (
+                            <>
+                              <Link
+                                href="/uploads"
+                                className="inline-flex h-9 items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10"
+                              >
+                                Go to Upload Data
+                              </Link>
+                              <Link
+                                href={manualHref}
+                                className="inline-flex h-9 items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10"
+                              >
+                                Enter Manually
+                              </Link>
+                            </>
+                          ) : null
+                        ) : (
+                          <label className="inline-flex h-9 cursor-pointer items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10">
+                            {isUploading
+                              ? "Uploading..."
+                              : hasUploadedFile
+                                ? "Replace file"
+                                : "Upload"}
+                            <input
+                              type="file"
+                              accept=".csv,text/csv"
+                              disabled={isUploading || isSaving}
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
 
-                              if (file) {
-                                onUpload(category.id, file);
-                              }
+                                if (file) {
+                                  onUpload(category.id, file);
+                                }
 
-                              event.target.value = "";
-                            }}
-                            className="sr-only"
-                          />
-                        </label>
+                                event.target.value = "";
+                              }}
+                              className="sr-only"
+                            />
+                          </label>
+                        )}
                         <button
                           type="button"
                           disabled={!canReview || isSaving}
@@ -183,14 +204,14 @@ export function MonthlyCloseChecklist({
                           >
                             Open Editor
                           </Link>
-                        ) : (
+                        ) : item.status !== "Not uploaded" ? (
                           <Link
                             href={manualHref}
                             className="inline-flex h-9 items-center rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-slate-100 hover:border-sky-300/30 hover:bg-sky-300/10"
                           >
                             Enter Manually
                           </Link>
-                        )}
+                        ) : null}
                         {hasWorksheet ? (
                           <Link
                             href="/account-mapping"

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { DashboardChart } from "@/components/DashboardChart";
 import { DemoCompanyLoader } from "@/components/DemoCompanyLoader";
+import { SmartUploadAssistant } from "@/components/SmartUploadAssistant";
 import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
 import { ForecastVersionNotice } from "@/components/ForecastVersionNotice";
 import { MetricCard } from "@/components/MetricCard";
@@ -294,14 +295,24 @@ export function DashboardPageContent() {
       />
 
       {isDemoEmptyState ? (
-        <DemoCompanyLoader
-          compact
-          onLoaded={() => {
-            setActiveCash(getActiveCashData());
-            setActiveBudget(getActiveBudgetData());
-            setActiveData(getActiveFinancialData());
-          }}
-        />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <DemoCompanyLoader
+            compact
+            onLoaded={() => {
+              setActiveCash(getActiveCashData());
+              setActiveBudget(getActiveBudgetData());
+              setActiveData(getActiveFinancialData());
+            }}
+          />
+          <SmartUploadAssistant
+            reportingMonth={`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`}
+            onComplete={() => {
+              setActiveCash(getActiveCashData());
+              setActiveBudget(getActiveBudgetData());
+              setActiveData(getActiveFinancialData());
+            }}
+          />
+        </div>
       ) : null}
 
       <AccountMappingNotice />

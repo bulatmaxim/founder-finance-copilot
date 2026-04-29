@@ -322,6 +322,25 @@ export async function markForecastRecommendationStatus({
   }
 }
 
+export async function saveForecastVersionCheckpoint(forecastVersionId: string) {
+  const { company } = await getCurrentCompany();
+
+  if (!company) {
+    throw new Error("Complete a company profile before saving the forecast.");
+  }
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("forecast_versions")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("company_id", company.id)
+    .eq("id", forecastVersionId);
+
+  if (error) {
+    throw new Error(`Forecast save failed: ${error.message}`);
+  }
+}
+
 export async function updateForecastRecommendationAssumptions({
   recommendation,
   driverChanges,
@@ -405,7 +424,10 @@ export async function applyAcceptedForecastRecommendations(
       throw new Error(`Forecast row lookup failed: ${existingError.message}`);
     }
 
-    if (existing?.row_type === "Actual" && existing.is_locked) {
+    if (
+      (existing?.row_type === "Actual" && existing.is_locked) ||
+      existing?.row_type === "Preliminary"
+    ) {
       continue;
     }
 

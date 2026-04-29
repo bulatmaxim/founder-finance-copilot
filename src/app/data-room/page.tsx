@@ -232,8 +232,18 @@ export default function DataRoomPage() {
           </div>
         </div>
 
-        <div className="mt-5 border-t border-white/10 pt-4 text-sm text-slate-500">
-          Selected period: {reportingMonthKey(selectedMonth)}
+        <div className="mt-5 grid gap-4 border-t border-white/10 pt-4 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div className="text-sm text-slate-500">
+            Selected period: {reportingMonthKey(selectedMonth)}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a href="/uploads" className="premium-pill inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium">
+              Go to Upload Data
+            </a>
+            <a href={`/data-entry?year=${selectedMonth.slice(0, 4)}`} className="premium-pill inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium">
+              Enter Manually
+            </a>
+          </div>
         </div>
       </div>
 
@@ -249,6 +259,7 @@ export default function DataRoomPage() {
             reportingMonth={selectedMonth}
             uploadingCategory={uploadingCategory}
             savingItemId={savingItemId}
+            reviewOnly
             onUpload={(category, file) => void handleUpload(category, file)}
             onStatusChange={(item, status) =>
               void handleStatusChange(item, status)
