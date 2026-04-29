@@ -48,7 +48,10 @@ import {
   type ActiveCashData,
   type ActiveFinancialData,
 } from "@/lib/localDataStore";
-import { generateMonthlyCfoDeck } from "@/lib/powerpoint";
+import {
+  generateMonthlyCfoDeck,
+  type PowerPointReportSections,
+} from "@/lib/powerpoint";
 import { hasSupabaseBrowserEnv } from "@/lib/supabase/client";
 import { saveGeneratedReportToSupabase } from "@/lib/supabase/data";
 
@@ -60,11 +63,15 @@ type ReadinessItem = {
 
 const sectionLabels: Record<keyof MonthlyReportSections, string> = {
   cfoBrief: "Include CFO Brief commentary",
+  financialHighlights: "Include Financial Highlights",
+  revenuePerformance: "Include Revenue Performance",
+  expensePerformance: "Include Expense Performance",
   budgetVsActuals: "Include Budget vs Actuals",
   forecastUpdate: "Include Forecast Update",
   cashRunway: "Include Cash Runway",
   kpiSummary: "Include KPI Summary",
   risksRecommendations: "Include Risks & Recommendations",
+  appendix: "Include Appendix",
 };
 
 export default function ReportsPage() {
@@ -85,6 +92,10 @@ export default function ReportsPage() {
   const [reportId, setReportId] = useState<string | null>(null);
   const [closeItems, setCloseItems] = useState<MonthlyCloseItem[]>([]);
   const [forecastVersions, setForecastVersions] = useState<ForecastVersionRecord[]>([]);
+  const [companyContext, setCompanyContext] = useState({
+    name: "",
+    industry: "",
+  });
   const [mappingWarning, setMappingWarning] = useState<string | null>(null);
   const [forecastDriverSummary, setForecastDriverSummary] = useState<string | null>(null);
   const [history, setHistory] = useState<MonthlyReportRecord[]>([]);
@@ -148,6 +159,10 @@ export default function ReportsPage() {
       ]);
 
       setCloseItems(closeResult.items);
+      setCompanyContext({
+        name: closeResult.company.name ?? "",
+        industry: closeResult.company.industry ?? "",
+      });
       setForecastVersions(versions);
       setHistory(reportHistory);
       setMappingWarning(
@@ -285,6 +300,17 @@ export default function ReportsPage() {
       const { fileName, blob } = await generateMonthlyCfoDeck({
         reportingMonth: dateToDisplayMonth(reportingMonth),
         brief: buildReportDeckContent(commentary),
+        reportType,
+        sections: buildPowerPointSections(sections),
+        metadata: {
+          companyName: companyContext.name,
+          industry: companyContext.industry,
+          reportType,
+          reportingMonth: dateToDisplayMonth(reportingMonth),
+          dataSource,
+          forecastVersionName: selectedForecastVersion?.name ?? null,
+          closeStatus,
+        },
       });
       let storagePath: string | null = null;
 
@@ -655,27 +681,33 @@ function ReportPreview({
         />
       ) : null}
 
-      <section className="rounded-md border border-neutral-200 bg-white p-5">
-        <h3 className="text-base font-semibold">Financial Highlights</h3>
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Revenue" value={formatCurrency(latestActual?.revenue ?? 0)} />
-          <MetricCard label="Gross Margin" value={formatPercent(latestActual?.grossMargin ?? 0)} />
-          <MetricCard label="EBITDA" value={formatCurrency(latestActual?.ebitda ?? 0)} />
-          <MetricCard label="Runway" value={formatRunwayMonths(latestActual?.runwayMonths ?? 0)} />
-        </div>
-      </section>
+      {sections.financialHighlights ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5">
+          <h3 className="text-base font-semibold">Financial Highlights</h3>
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Revenue" value={formatCurrency(latestActual?.revenue ?? 0)} />
+            <MetricCard label="Gross Margin" value={formatPercent(latestActual?.grossMargin ?? 0)} />
+            <MetricCard label="EBITDA" value={formatCurrency(latestActual?.ebitda ?? 0)} />
+            <MetricCard label="Runway" value={formatRunwayMonths(latestActual?.runwayMonths ?? 0)} />
+          </div>
+        </section>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <EditableSection
-          title="Revenue Performance"
-          value={commentary.revenueCommentary}
-          onChange={(value) => onCommentaryChange("revenueCommentary", value)}
-        />
-        <EditableSection
-          title="Expense Performance"
-          value={commentary.expenseCommentary}
-          onChange={(value) => onCommentaryChange("expenseCommentary", value)}
-        />
+        {sections.revenuePerformance ? (
+          <EditableSection
+            title="Revenue Performance"
+            value={commentary.revenueCommentary}
+            onChange={(value) => onCommentaryChange("revenueCommentary", value)}
+          />
+        ) : null}
+        {sections.expensePerformance ? (
+          <EditableSection
+            title="Expense Performance"
+            value={commentary.expenseCommentary}
+            onChange={(value) => onCommentaryChange("expenseCommentary", value)}
+          />
+        ) : null}
         {sections.budgetVsActuals ? (
           <section className="rounded-md border border-neutral-200 bg-white p-5">
             <h3 className="text-base font-semibold">Budget vs Actuals</h3>
@@ -736,14 +768,16 @@ function ReportPreview({
         ) : null}
       </div>
 
-      <section className="rounded-md border border-neutral-200 bg-white p-5">
-        <h3 className="text-base font-semibold">Appendix</h3>
-        <p className="mt-2 text-sm leading-6 text-neutral-600">
-          Report type: {reportType}. Reporting month:{" "}
-          {dateToDisplayMonth(reportingMonth)}. Source pages: Dashboard, Data
-          Room, Account Mapping, Budget vs Actuals, Forecasts, and CFO Brief.
-        </p>
-      </section>
+      {sections.appendix ? (
+        <section className="rounded-md border border-neutral-200 bg-white p-5">
+          <h3 className="text-base font-semibold">Appendix</h3>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">
+            Report type: {reportType}. Reporting month:{" "}
+            {dateToDisplayMonth(reportingMonth)}. Source pages: Dashboard, Data
+            Room, Account Mapping, Budget vs Actuals, Forecasts, and CFO Brief.
+          </p>
+        </section>
+      ) : null}
     </section>
   );
 }
@@ -888,6 +922,24 @@ function currentMonthValue() {
   const today = new Date();
 
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function buildPowerPointSections(
+  sections: MonthlyReportSections,
+): PowerPointReportSections {
+  return {
+    executiveSummary: sections.cfoBrief,
+    financialHighlights: sections.financialHighlights,
+    revenuePerformance: sections.revenuePerformance,
+    expensePerformance: sections.expensePerformance,
+    budgetVsActuals: sections.budgetVsActuals,
+    cashRunway: sections.cashRunway,
+    forecastUpdate: sections.forecastUpdate,
+    kpiSummary: sections.kpiSummary,
+    risks: sections.risksRecommendations,
+    recommendations: sections.risksRecommendations,
+    appendix: sections.appendix,
+  };
 }
 
 function formatDate(value: string | null) {

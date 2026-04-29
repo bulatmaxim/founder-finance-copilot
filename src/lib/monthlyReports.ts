@@ -36,11 +36,15 @@ export type MonthlyReportStatus = "Draft" | "Ready" | "Exported" | "Archived";
 
 export type MonthlyReportSections = {
   cfoBrief: boolean;
+  financialHighlights: boolean;
+  revenuePerformance: boolean;
+  expensePerformance: boolean;
   budgetVsActuals: boolean;
   forecastUpdate: boolean;
   cashRunway: boolean;
   kpiSummary: boolean;
   risksRecommendations: boolean;
+  appendix: boolean;
 };
 
 export type MonthlyReportCommentary = {
@@ -79,11 +83,15 @@ export const reportTypes: MonthlyReportType[] = [
 
 export const defaultReportSections: MonthlyReportSections = {
   cfoBrief: true,
+  financialHighlights: true,
+  revenuePerformance: true,
+  expensePerformance: true,
   budgetVsActuals: true,
   forecastUpdate: true,
   cashRunway: true,
   kpiSummary: true,
   risksRecommendations: true,
+  appendix: true,
 };
 
 export function buildDefaultReportCommentary(
