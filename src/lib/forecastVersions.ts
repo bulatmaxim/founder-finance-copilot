@@ -89,6 +89,7 @@ export type CreateForecastVersionInput = {
   sourceVersionId?: string;
   actualsThroughMonth?: string;
   notes?: string;
+  includeNextYear?: boolean;
 };
 
 export const forecastVersionTypes: ForecastVersionType[] = [
@@ -252,6 +253,21 @@ export async function createForecastVersion(input: CreateForecastVersionInput) {
     sourceVersionId: input.sourceVersionId,
     actualsThroughMonth,
   });
+
+  if (input.includeNextYear) {
+    rows.push(
+      ...(await buildForecastRows({
+        userId: user.id,
+        companyId: company.id,
+        forecastVersionId: version.id as string,
+        fiscalYear: input.fiscalYear + 1,
+        versionType: "Rolling Forecast",
+        sourceVersionId: input.sourceVersionId,
+        actualsThroughMonth: null,
+        sourceLabel: "Next-year forecast impact",
+      })),
+    );
+  }
 
   if (rows.length > 0) {
     const { error: rowsError } = await supabase
@@ -473,6 +489,7 @@ async function buildForecastRows({
   versionType,
   sourceVersionId,
   actualsThroughMonth,
+  sourceLabel,
 }: {
   userId: string;
   companyId: string;
@@ -481,6 +498,7 @@ async function buildForecastRows({
   versionType: ForecastVersionType;
   sourceVersionId?: string;
   actualsThroughMonth: string | null;
+  sourceLabel?: string;
 }) {
   const fiscalMonths = getFiscalMonthOptions(fiscalYear).map((option) => option.value);
   const [sourceRows, approvedActualPeriods] = await Promise.all([
@@ -515,6 +533,8 @@ async function buildForecastRows({
         source:
           rowType === "Actual"
             ? "Approved Data Room actuals"
+            : sourceLabel
+              ? sourceLabel
             : sourceVersionId
               ? "Source forecast version"
               : "Placeholder forecast assumptions",

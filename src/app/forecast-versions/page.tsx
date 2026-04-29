@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Toast, type ToastMessage, type ToastType } from "@/components/Toast";
+import { ForecastGridWorkspace } from "@/components/forecast/ForecastGridWorkspace";
 import {
   applyForecastDriversToVersion,
   buildForecastDriverPreview,
@@ -18,35 +19,50 @@ import {
   forecastVersionTypes,
   getFiscalMonthOptions,
   loadForecastVersionsForDisplay,
-  rowsToForecastMonths,
   setSelectedForecastVersionId,
-  updateForecastVersionMonthRows,
   updateForecastVersionStatus,
   type CreateForecastVersionInput,
   type ForecastVersionStatus,
   type ForecastVersionType,
   type ForecastVersionWithRows,
-  type ForecastVersionRowRecord,
 } from "@/lib/forecastVersions";
-import { formatCurrency, formatPercent } from "@/lib/formatting";
+import { formatCurrency } from "@/lib/formatting";
 
 type FormState = {
   name: string;
   fiscalYear: number;
   versionType: ForecastVersionType;
+  forecastTemplate: StandardForecastTemplate;
   sourceVersionId: string;
   actualsThroughMonth: string;
+  includeNextYear: boolean;
   notes: string;
 };
 
 const currentYear = new Date().getFullYear();
+type StandardForecastTemplate =
+  | "Budget"
+  | "2+10 Forecast"
+  | "5+7 Forecast"
+  | "8+4 Forecast"
+  | "10+2 Forecast";
+
+const standardForecastTemplates: StandardForecastTemplate[] = [
+  "Budget",
+  "2+10 Forecast",
+  "5+7 Forecast",
+  "8+4 Forecast",
+  "10+2 Forecast",
+];
 
 const defaultForm: FormState = {
   name: `FY${currentYear} Budget`,
   fiscalYear: currentYear,
   versionType: "Budget",
+  forecastTemplate: "Budget",
   sourceVersionId: "",
   actualsThroughMonth: "",
+  includeNextYear: false,
   notes: "",
 };
 
@@ -102,6 +118,15 @@ export default function ForecastVersionsPage() {
     setForm((current) => ({ ...current, ...patch }));
   }
 
+  function applyTemplate(template: StandardForecastTemplate, fiscalYear = form.fiscalYear) {
+    updateForm({
+      forecastTemplate: template,
+      versionType: template === "Budget" ? "Budget" : "Rolling Forecast",
+      actualsThroughMonth: actualsThroughMonthForTemplate(fiscalYear, template),
+      name: `FY${fiscalYear} ${template}`,
+    });
+  }
+
   function beginRollingForecast(sourceVersionId?: string) {
     const source = versions.find((version) => version.id === sourceVersionId);
 
@@ -109,14 +134,46 @@ export default function ForecastVersionsPage() {
       name: `FY${source?.fiscal_year ?? currentYear} Rolling Forecast`,
       fiscalYear: source?.fiscal_year ?? currentYear,
       versionType: "Rolling Forecast",
+      forecastTemplate: "5+7 Forecast",
       sourceVersionId: source?.id ?? "",
-      actualsThroughMonth: "",
+      actualsThroughMonth: actualsThroughMonthForTemplate(
+        source?.fiscal_year ?? currentYear,
+        "5+7 Forecast",
+      ),
+      includeNextYear: false,
       notes: "",
     });
     setShowForm(true);
   }
 
   async function handleCreateVersion() {
+    const expectedActualMonth = actualsThroughMonthForTemplate(
+      form.fiscalYear,
+      form.forecastTemplate,
+    );
+
+    if (
+      expectedActualMonth !== (form.actualsThroughMonth || "") &&
+      !window.confirm(
+        `${form.forecastTemplate} usually uses ${
+          expectedActualMonth
+            ? `actuals through ${dateToDisplayMonth(expectedActualMonth)}`
+            : "no actualized months"
+        }. Continue with the selected actualization month?`,
+      )
+    ) {
+      return;
+    }
+
+    if (
+      form.includeNextYear &&
+      !window.confirm(
+        "Include next-year forecast impact? This will add all-forecast months for the following fiscal year to this version.",
+      )
+    ) {
+      return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -126,6 +183,7 @@ export default function ForecastVersionsPage() {
         versionType: form.versionType,
         sourceVersionId: form.sourceVersionId || undefined,
         actualsThroughMonth: form.actualsThroughMonth || undefined,
+        includeNextYear: form.includeNextYear,
         notes: form.notes || undefined,
       };
       const version = await createForecastVersion(payload);
@@ -135,7 +193,9 @@ export default function ForecastVersionsPage() {
         "Forecast version created.",
         form.actualsThroughMonth
           ? "Approved Data Room actuals were used where available; remaining months use the selected source or placeholder assumptions."
-          : "Future months use the selected source or placeholder assumptions.",
+          : form.includeNextYear
+            ? "Current and next-year future months use the selected source or placeholder assumptions."
+            : "Future months use the selected source or placeholder assumptions.",
       );
       setSelectedVersionIdState(version.id);
       setSelectedForecastVersionId(version.id);
@@ -250,11 +310,34 @@ export default function ForecastVersionsPage() {
               <input
                 type="number"
                 value={form.fiscalYear}
-                onChange={(event) =>
-                  updateForm({ fiscalYear: Number(event.target.value) })
-                }
+                onChange={(event) => {
+                  const fiscalYear = Number(event.target.value);
+                  updateForm({
+                    fiscalYear,
+                    actualsThroughMonth: actualsThroughMonthForTemplate(
+                      fiscalYear,
+                      form.forecastTemplate,
+                    ),
+                  });
+                }}
                 className="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm outline-none focus:border-neutral-950"
               />
+            </label>
+            <label className="text-sm font-medium text-neutral-700">
+              Forecast type
+              <select
+                value={form.forecastTemplate}
+                onChange={(event) =>
+                  applyTemplate(event.target.value as StandardForecastTemplate)
+                }
+                className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none focus:border-neutral-950"
+              >
+                {standardForecastTemplates.map((template) => (
+                  <option key={template} value={template}>
+                    {template}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="text-sm font-medium text-neutral-700">
               Version type
@@ -309,7 +392,33 @@ export default function ForecastVersionsPage() {
               value={form.notes}
               onChange={(value) => updateForm({ notes: value })}
             />
+            <label className="flex items-center gap-2 rounded-md border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-700 lg:col-span-3">
+              <input
+                type="checkbox"
+                checked={form.includeNextYear}
+                onChange={(event) =>
+                  updateForm({ includeNextYear: event.target.checked })
+                }
+              />
+              Include next-year forecast impact
+            </label>
           </div>
+
+          {actualsThroughMonthForTemplate(form.fiscalYear, form.forecastTemplate) !==
+          (form.actualsThroughMonth || "") ? (
+            <div className="mt-4 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
+              {form.forecastTemplate} usually uses{" "}
+              {actualsThroughMonthForTemplate(form.fiscalYear, form.forecastTemplate)
+                ? `actuals through ${dateToDisplayMonth(
+                    actualsThroughMonthForTemplate(
+                      form.fiscalYear,
+                      form.forecastTemplate,
+                    ),
+                  )}`
+                : "no actualized months"}
+              . You can still proceed with the selected setup.
+            </div>
+          ) : null}
 
           <div className="mt-5">
             <button
@@ -355,16 +464,16 @@ export default function ForecastVersionsPage() {
               )
             }
           />
-          <ForecastVersionDetails
+          <ForecastGridWorkspace
             version={selectedVersion}
-            onSaved={async () => {
-              notify("success", "Forecast month updated.");
+            onSaved={async (title, detail) => {
+              notify("success", title, detail);
               await loadVersions();
             }}
-            onError={(error) =>
+            onError={(title, error) =>
               notify(
                 "error",
-                "Forecast month could not be updated.",
+                title,
                 error instanceof Error ? error.message : "Try again.",
               )
             }
@@ -776,197 +885,6 @@ function DriverPreviewTable({
   );
 }
 
-function ForecastVersionDetails({
-  version,
-  onSaved,
-  onError,
-}: {
-  version: ForecastVersionWithRows;
-  onSaved: () => Promise<void>;
-  onError: (error: unknown) => void;
-}) {
-  const [draftRows, setDraftRows] = useState<ForecastVersionRowRecord[]>(
-    version.rows,
-  );
-  const [savingMonth, setSavingMonth] = useState("");
-  const hasActualsThrough = Boolean(version.actuals_through_month);
-  const hasApprovedActualRows = draftRows.some((row) => row.row_type === "Actual");
-  const periods = useMemo(() => rowsToForecastMonths(draftRows), [draftRows]);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setDraftRows(version.rows);
-    }, 0);
-
-    return () => window.clearTimeout(timeout);
-  }, [version.rows]);
-
-  function updateAmount(month: string, category: string, value: string) {
-    const parsed = Number(value);
-
-    setDraftRows((current) =>
-      current.map((row) =>
-        row.month === month && row.category === category
-          ? { ...row, amount: Number.isFinite(parsed) ? parsed : 0 }
-          : row,
-      ),
-    );
-  }
-
-  async function saveMonth(month: string) {
-    setSavingMonth(month);
-
-    try {
-      await updateForecastVersionMonthRows({
-        forecastVersionId: version.id,
-        month,
-        amounts: editableCategories.reduce<Record<string, number>>(
-          (accumulator, category) => ({
-            ...accumulator,
-            [category]: amountForDraftRow(draftRows, month, category),
-          }),
-          {},
-        ),
-      });
-      await onSaved();
-    } catch (error) {
-      console.error("Forecast month update failed", error);
-      onError(error);
-    } finally {
-      setSavingMonth("");
-    }
-  }
-
-  return (
-    <section className="overflow-hidden rounded-md border border-neutral-200 bg-white">
-      <div className="border-b border-neutral-200 px-5 py-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h2 className="text-base font-semibold">{version.name}</h2>
-            <p className="mt-1 text-sm text-neutral-500">
-              {version.version_type} for FY{version.fiscal_year}
-              {version.actuals_through_month
-                ? `, actualized through ${dateToDisplayMonth(version.actuals_through_month)}`
-                : ""}.
-            </p>
-          </div>
-          <span className="rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
-            {version.status}
-          </span>
-        </div>
-
-        {hasActualsThrough && !hasApprovedActualRows ? (
-          <div className="mt-4 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
-            This version requested actualized months, but no approved Data Room
-            actuals were found for the selected actualization period.
-          </div>
-        ) : null}
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1180px] text-right text-sm">
-          <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-600">
-            <tr>
-              <th className="px-4 py-3 text-left font-medium">Month</th>
-              <th className="px-4 py-3 font-medium">Type</th>
-              <th className="px-4 py-3 font-medium">Revenue</th>
-              <th className="px-4 py-3 font-medium">Cost of revenue</th>
-              <th className="px-4 py-3 font-medium">Gross profit</th>
-              <th className="px-4 py-3 font-medium">Gross margin</th>
-              <th className="px-4 py-3 font-medium">Operating expenses</th>
-              <th className="px-4 py-3 font-medium">EBITDA / net income</th>
-              <th className="px-4 py-3 font-medium">Cash impact</th>
-            </tr>
-          </thead>
-          <tbody>
-            {periods.map((period) => {
-              const monthDate = displayMonthToDateLocal(period.month);
-              const isEditable = period.periodType !== "Actual";
-
-              return (
-              <tr key={period.month} className="border-b border-neutral-100">
-                <td className="px-4 py-3 text-left font-medium">{period.month}</td>
-                <td className="px-4 py-3">
-                  <span className="rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
-                    {period.periodType}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <AmountCell
-                    value={period.revenue}
-                    editable={isEditable}
-                    onChange={(value) => updateAmount(monthDate, "Revenue", value)}
-                  />
-                </td>
-                <td className="px-4 py-3">
-                  <AmountCell
-                    value={period.costOfRevenue}
-                    editable={isEditable}
-                    onChange={(value) =>
-                      updateAmount(monthDate, "Cost of Revenue", value)
-                    }
-                  />
-                </td>
-                <td className="px-4 py-3">{formatCurrency(period.grossProfit)}</td>
-                <td className="px-4 py-3">{formatPercent(period.grossMargin)}</td>
-                <td className="px-4 py-3">
-                  <div className="space-y-2">
-                    <AmountCell
-                      label="S&M"
-                      value={period.salesAndMarketing}
-                      editable={isEditable}
-                      onChange={(value) =>
-                        updateAmount(monthDate, "Sales & Marketing", value)
-                      }
-                    />
-                    <AmountCell
-                      label="R&D"
-                      value={period.researchAndDevelopment}
-                      editable={isEditable}
-                      onChange={(value) =>
-                        updateAmount(monthDate, "Research & Development", value)
-                      }
-                    />
-                    <AmountCell
-                      label="G&A"
-                      value={period.generalAndAdministrative}
-                      editable={isEditable}
-                      onChange={(value) =>
-                        updateAmount(monthDate, "General & Administrative", value)
-                      }
-                    />
-                  </div>
-                </td>
-                <td className="px-4 py-3">{formatCurrency(period.ebitda)}</td>
-                <td className="px-4 py-3">
-                  <div className="space-y-2">
-                    <AmountCell
-                      value={period.cashBalance}
-                      editable={isEditable}
-                      onChange={(value) => updateAmount(monthDate, "Cash Balance", value)}
-                    />
-                    {isEditable ? (
-                      <button
-                        type="button"
-                        disabled={savingMonth === monthDate}
-                        onClick={() => void saveMonth(monthDate)}
-                        className="rounded-md border border-neutral-300 px-3 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-400"
-                      >
-                        {savingMonth === monthDate ? "Saving..." : "Save month"}
-                      </button>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
     <article className="rounded-md border border-neutral-200 bg-white p-5">
@@ -974,68 +892,6 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
       <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
     </article>
   );
-}
-
-const editableCategories = [
-  "Revenue",
-  "Cost of Revenue",
-  "Sales & Marketing",
-  "Research & Development",
-  "General & Administrative",
-  "Cash Balance",
-];
-
-function AmountCell({
-  value,
-  editable,
-  label,
-  onChange,
-}: {
-  value: number;
-  editable: boolean;
-  label?: string;
-  onChange: (value: string) => void;
-}) {
-  if (!editable) {
-    return (
-      <span>
-        {label ? `${label}: ` : ""}
-        {formatCurrency(value)}
-      </span>
-    );
-  }
-
-  return (
-    <label className="flex items-center justify-end gap-2 text-xs text-neutral-500">
-      {label ? <span>{label}</span> : null}
-      <input
-        type="number"
-        value={Math.round(value)}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-8 w-28 rounded-md border border-neutral-300 px-2 text-right text-sm text-neutral-950 outline-none focus:border-neutral-950"
-      />
-    </label>
-  );
-}
-
-function amountForDraftRow(
-  rows: ForecastVersionRowRecord[],
-  month: string,
-  category: string,
-) {
-  return Number(
-    rows.find((row) => row.month === month && row.category === category)?.amount ?? 0,
-  );
-}
-
-function displayMonthToDateLocal(month: string) {
-  const date = new Date(`${month} 1`);
-
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
 function TextField({
@@ -1095,6 +951,26 @@ function summarizeVersions(versions: ForecastVersionWithRows[]) {
     drafts: versions.filter((version) => version.status === "Draft").length,
     latestActualizedMonth,
   };
+}
+
+function actualsThroughMonthForTemplate(
+  fiscalYear: number,
+  template: StandardForecastTemplate,
+) {
+  const monthNumberByTemplate: Record<StandardForecastTemplate, number> = {
+    Budget: 0,
+    "2+10 Forecast": 2,
+    "5+7 Forecast": 5,
+    "8+4 Forecast": 8,
+    "10+2 Forecast": 10,
+  };
+  const monthNumber = monthNumberByTemplate[template];
+
+  if (monthNumber === 0) {
+    return "";
+  }
+
+  return `${fiscalYear}-${String(monthNumber).padStart(2, "0")}-01`;
 }
 
 function formatDate(value: string | null) {
