@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { Toast, type ToastMessage } from "@/components/Toast";
-import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,43 +15,33 @@ export default function LoginPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!hasSupabaseBrowserEnv()) {
-      setToast({
-        id: Date.now(),
-        type: "error",
-        title: "Supabase is not configured.",
-        detail: "Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.",
-      });
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const nextPath =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("next") ??
+            new URLSearchParams(window.location.search).get("redirectedFrom")
+          : null;
+      const response = await fetch("/auth/sign-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          password,
+          next: nextPath,
+        }),
       });
+      const result = (await response.json().catch(() => null)) as {
+        error?: string;
+        next?: string;
+      } | null;
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        throw new Error(result?.error ?? "Check your email and password.");
       }
 
-      setToast({
-        id: Date.now(),
-        type: "success",
-        title: "Logged in successfully.",
-      });
-      const redirectedFrom =
-        typeof window !== "undefined"
-          ? new URLSearchParams(window.location.search).get("redirectedFrom")
-          : null;
-      router.push(
-        redirectedFrom?.startsWith("/") && !redirectedFrom.startsWith("//")
-          ? redirectedFrom
-          : "/dashboard",
-      );
+      router.replace(result?.next ?? "/dashboard");
       router.refresh();
     } catch (error) {
       console.error("Login failed", error);

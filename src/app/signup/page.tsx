@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { Toast, type ToastMessage } from "@/components/Toast";
-import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -17,52 +16,38 @@ export default function SignupPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!hasSupabaseBrowserEnv()) {
-      setToast({
-        id: Date.now(),
-        type: "error",
-        title: "Supabase is not configured.",
-        detail: "Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.",
-      });
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
-      const supabase = createClient();
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { full_name: fullName },
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      if (data.user) {
-        await supabase.from("profiles").upsert({
-          id: data.user.id,
+      const response = await fetch("/auth/sign-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           email,
-          full_name: fullName,
-          updated_at: new Date().toISOString(),
-        });
+          password,
+          fullName,
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as {
+        error?: string;
+        hasSession?: boolean;
+        next?: string;
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(result?.error ?? "Try again with a valid email and password.");
       }
 
       setToast({
         id: Date.now(),
         type: "success",
         title: "Account created.",
-        detail: data.session
+        detail: result?.hasSession
           ? "Next, create the Acme AI company profile."
           : "Check your email if confirmation is enabled, then log in.",
       });
 
-      router.push(data.session ? "/onboarding" : "/login");
+      router.replace(result?.next ?? (result?.hasSession ? "/onboarding" : "/login"));
       router.refresh();
     } catch (error) {
       console.error("Signup failed", error);

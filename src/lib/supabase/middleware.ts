@@ -6,6 +6,7 @@ const protectedRoutes = [
   "/account-mapping",
   "/budget-vs-actuals",
   "/company-profile",
+  "/data-entry",
   "/data-room",
   "/decision-center",
   "/forecast-versions",
@@ -57,14 +58,14 @@ export async function updateSession(request: NextRequest) {
   if (!user && isProtectedRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    url.searchParams.set("redirectedFrom", pathname);
-    return NextResponse.redirect(url);
+    url.searchParams.set("next", safeNextPath(request));
+    return redirectWithCookies(url, response);
   }
 
   if (user && isAuthRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
+    return redirectWithCookies(url, response);
   }
 
   if (user && isProtectedRoute && pathname !== "/onboarding") {
@@ -77,7 +78,7 @@ export async function updateSession(request: NextRequest) {
     if (!company) {
       const url = request.nextUrl.clone();
       url.pathname = "/onboarding";
-      return NextResponse.redirect(url);
+      return redirectWithCookies(url, response);
     }
   }
 
@@ -91,9 +92,25 @@ export async function updateSession(request: NextRequest) {
     if (company) {
       const url = request.nextUrl.clone();
       url.pathname = "/dashboard";
-      return NextResponse.redirect(url);
+      return redirectWithCookies(url, response);
     }
   }
 
   return response;
+}
+
+function safeNextPath(request: NextRequest) {
+  const path = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+
+  return path.startsWith("/") && !path.startsWith("//") ? path : "/dashboard";
+}
+
+function redirectWithCookies(url: URL, response: NextResponse) {
+  const redirectResponse = NextResponse.redirect(url);
+
+  response.cookies.getAll().forEach((cookie) => {
+    redirectResponse.cookies.set(cookie);
+  });
+
+  return redirectResponse;
 }
