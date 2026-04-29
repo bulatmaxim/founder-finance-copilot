@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { cookieNamesFromRequest, logAuthDebug } from "@/lib/authDebug";
 import { getRequestOrigin } from "@/lib/supabase/cookieOptions";
-import { createClient, hasSupabaseServerEnv } from "@/lib/supabase/server";
+import { createRouteClient } from "@/lib/supabase/route";
+import { hasSupabaseServerEnv } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +30,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
+  const routeClient = createRouteClient(request);
+  const { supabase } = routeClient;
   const origin = getRequestOrigin(request);
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -40,6 +43,13 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
+    logAuthDebug("sign-up failed", {
+      pathname: request.nextUrl.pathname,
+      requestCookieNames: cookieNamesFromRequest(request),
+      responseCookieNames: routeClient.getCookieNamesToSet(),
+      reason: error.message,
+      redirectTarget: null,
+    });
     return noStoreJson({ error: error.message }, { status: 400 });
   }
 
@@ -56,10 +66,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return noStoreJson({
+  const next = data.session ? "/onboarding" : "/login";
+  const response = noStoreJson({
     hasSession: Boolean(data.session),
-    next: data.session ? "/onboarding" : "/login",
+    next,
   });
+
+  routeClient.applyCookies(response);
+  logAuthDebug("sign-up succeeded", {
+    pathname: request.nextUrl.pathname,
+    requestCookieNames: cookieNamesFromRequest(request),
+    responseCookieNames: routeClient.getCookieNamesToSet(),
+    hasResponseCookies: routeClient.getCookieNamesToSet().length > 0,
+    hasSession: Boolean(data.session),
+    redirectTarget: next,
+  });
+
+  return response;
 }
 
 function noStoreJson(body: unknown, init?: ResponseInit) {
