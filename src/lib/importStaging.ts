@@ -45,6 +45,8 @@ export type ImportBatchSummary = {
 
 export type StagedAccountRollup = {
   rawAccountName: string;
+  accountCode: string;
+  departmentCode: string;
   sourceType: string;
   sourceFiles: string[];
   firstSeenDate: string | null;
@@ -55,6 +57,9 @@ export type StagedAccountRollup = {
   suggestedCategory: string;
   mappedCategory: string;
   department: string;
+  suggestedDepartment: string;
+  confidence: "High" | "Medium" | "Low";
+  reason: string;
 };
 
 type RawCsvRow = Record<string, unknown>;
@@ -284,7 +289,7 @@ export async function loadStagedAccountRollups() {
   const { data, error } = await supabase
     .from("import_staged_rows")
     .select(
-      "raw_account_name, file_category, period, amount, mapping_status, mapped_category, department, uploaded_file_id",
+      "raw_account_name, account_code, file_category, period, amount, mapping_status, mapped_category, department, department_code, uploaded_file_id",
     )
     .not("raw_account_name", "is", null);
 
@@ -308,17 +313,28 @@ export async function loadStagedAccountRollups() {
     const period = normalizePeriod(String(row.period ?? ""));
     const amount = Number(row.amount ?? 0);
     const suggestion = suggestAccountMapping(rawAccountName);
-    const mappedCategory =
-      mappingLookup.get(key) ?? String(row.mapped_category ?? "");
-    const mappingStatus: StagedRowMappingStatus = mappedCategory
-      ? "Mapped"
-      : suggestion.category === "Uncategorized"
-        ? "Unmapped"
-        : "Suggested";
+    const savedCategory = mappingLookup.get(key) ?? "";
+    const stagedStatus = String(row.mapping_status ?? "");
+    const suggestedCategory = String(row.mapped_category ?? "") || suggestion.category;
+    const mappingStatus: StagedRowMappingStatus =
+      stagedStatus === "Ignored"
+        ? "Ignored"
+        : savedCategory
+          ? "Mapped"
+          : suggestedCategory === "Uncategorized"
+            ? "Unmapped"
+            : "Suggested";
+    const confidence = savedCategory
+      ? "High"
+      : suggestedCategory === "Uncategorized"
+        ? "Low"
+        : "Medium";
 
     if (!existing) {
       byAccount.set(key, {
         rawAccountName,
+        accountCode: String(row.account_code ?? ""),
+        departmentCode: String(row.department_code ?? ""),
         sourceType: sourceTypeForCategory(String(row.file_category ?? "")),
         sourceFiles: [String(row.uploaded_file_id ?? "")].filter(Boolean),
         firstSeenDate: period,
@@ -326,9 +342,16 @@ export async function loadStagedAccountRollups() {
         totalAmount: Number.isFinite(amount) ? amount : 0,
         rowCount: 1,
         mappingStatus,
-        suggestedCategory: suggestion.category,
-        mappedCategory,
-        department: String(row.department ?? suggestion.department ?? ""),
+        suggestedCategory,
+        mappedCategory: savedCategory,
+        department: String(row.department ?? ""),
+        suggestedDepartment: String(row.department ?? suggestion.department ?? ""),
+        confidence,
+        reason: savedCategory
+          ? "Matched from confirmed Company Mapping."
+          : confidence === "Low"
+            ? "No confirmed account mapping exists for this imported value."
+            : "Suggested from uploaded account description/name; confirmation is required.",
       });
       return;
     }
@@ -350,7 +373,9 @@ export async function loadStagedAccountRollups() {
     }
     if (existing.mappingStatus !== "Mapped") {
       existing.mappingStatus = mappingStatus;
-      existing.mappedCategory = mappedCategory;
+      existing.mappedCategory = savedCategory;
+      existing.suggestedCategory = suggestedCategory;
+      existing.confidence = confidence;
     }
   });
 

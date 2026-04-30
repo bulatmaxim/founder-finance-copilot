@@ -38,6 +38,7 @@ export function SmartUploadAssistant({
   const [review, setReview] = useState<SmartUploadReview | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isStaging, setIsStaging] = useState(false);
+  const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<string[]>([]);
 
   async function handleFile(fileToAnalyze: File) {
     setFile(fileToAnalyze);
@@ -47,6 +48,7 @@ export function SmartUploadAssistant({
     try {
       const nextReview = await analyzeSmartUpload(fileToAnalyze);
       setReview(nextReview);
+      setSelectedSuggestionIds([]);
       onNotify?.(
         nextReview.confidence === "High" ? "success" : "warning",
         "Smart Upload analyzed the file.",
@@ -63,6 +65,55 @@ export function SmartUploadAssistant({
       setIsAnalyzing(false);
       if (inputRef.current) inputRef.current.value = "";
     }
+  }
+
+  async function handleSheetChange(sheetName: string) {
+    if (!file) {
+      return;
+    }
+
+    setIsAnalyzing(true);
+
+    try {
+      const nextReview = await analyzeSmartUpload(file, { sheetName });
+      setReview(nextReview);
+      setSelectedSuggestionIds([]);
+      onNotify?.(
+        nextReview.confidence === "High" ? "success" : "warning",
+        "Smart Upload re-analyzed the selected sheet.",
+        `${sheetName}: ${categoryTitle(nextReview.detectedCategory)} detected with ${nextReview.confidence.toLowerCase()} confidence.`,
+      );
+    } catch (error) {
+      console.error("Smart Upload sheet analysis failed", error);
+      onNotify?.(
+        "error",
+        "Smart Upload could not analyze that sheet.",
+        error instanceof Error ? error.message : "Try another sheet.",
+      );
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  function toggleSuggestionSelection(suggestionId: string, checked: boolean) {
+    setSelectedSuggestionIds((current) =>
+      checked
+        ? [...new Set([...current, suggestionId])]
+        : current.filter((id) => id !== suggestionId),
+    );
+  }
+
+  function confirmSelectedSuggestions() {
+    setReview((current) => {
+      if (!current) return current;
+
+      return selectedSuggestionIds.reduce(
+        (nextReview, suggestionId) =>
+          updateSmartUploadMappingSuggestion(nextReview, suggestionId, { action: "Confirm" }),
+        current,
+      );
+    });
+    setSelectedSuggestionIds([]);
   }
 
   async function handleConfirm() {
@@ -115,7 +166,7 @@ export function SmartUploadAssistant({
       <input
         ref={inputRef}
         type="file"
-        accept=".csv,text/csv"
+        accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
         className="hidden"
         onChange={(event) => {
           const selected = event.target.files?.[0];
@@ -128,10 +179,15 @@ export function SmartUploadAssistant({
             Smart Upload
           </p>
           {!compact ? (
-            <p className="mt-1 text-sm leading-6 text-[color:var(--text-muted)]">
-              Upload any finance CSV. The app detects the file type, suggests
-              column mapping, and stages rows before reporting uses them.
-            </p>
+            <>
+              <p className="mt-1 text-sm leading-6 text-[color:var(--text-muted)]">
+                Upload any finance file. The app detects the file type, suggests
+                column mapping, and stages rows before reporting uses them.
+              </p>
+              <p className="mt-1 text-xs text-[color:var(--text-muted)]">
+                Supported formats: CSV, XLSX, XLS.
+              </p>
+            </>
           ) : null}
         </div>
         <button
@@ -164,33 +220,77 @@ export function SmartUploadAssistant({
                   <p key={line}>{line}</p>
                 ))}
                 <p>{review.aiUsed ? "AI assisted this mapping. Please confirm before staging." : "Rule-based mapping. Please confirm before staging."}</p>
+                <p>
+                  New codes are not considered mapped until confirmed. This protects reporting,
+                  forecasts, and AI analysis from misclassification.
+                </p>
               </div>
             </div>
-            <label className="min-w-64 text-sm font-medium text-[color:var(--text-soft)]">
-              Change File Type
-              <select
-                value={review.detectedCategory}
-                onChange={(event) =>
-                  setReview((current) =>
-                    current
-                      ? {
-                          ...current,
-                          detectedCategory: event.target.value as SmartUploadDetectedCategory,
-                        }
-                      : current,
-                  )
-                }
-                className="mt-2 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm"
-              >
-                <option value="unknown">Unknown / Needs Review</option>
-                {monthlyCloseCategories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.title}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[32rem]">
+              {review.sheetNames.length > 1 ? (
+                <label className="text-sm font-medium text-[color:var(--text-soft)]">
+                  Select Sheet
+                  <select
+                    value={review.selectedSheetName ?? ""}
+                    disabled={isAnalyzing}
+                    onChange={(event) => void handleSheetChange(event.target.value)}
+                    className="mt-2 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm"
+                  >
+                    {review.sheetNames.map((sheetName) => (
+                      <option key={sheetName} value={sheetName}>
+                        {sheetName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <label className="text-sm font-medium text-[color:var(--text-soft)]">
+                Change File Type
+                <select
+                  value={review.detectedCategory}
+                  onChange={(event) =>
+                    setReview((current) =>
+                      current
+                        ? {
+                            ...current,
+                            detectedCategory: event.target.value as SmartUploadDetectedCategory,
+                          }
+                        : current,
+                    )
+                  }
+                  className="mt-2 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm"
+                >
+                  <option value="unknown">Unknown / Needs Review</option>
+                  {monthlyCloseCategories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
+
+          {review.selectedSheetName ? (
+            <section className="premium-pill mt-4 grid gap-3 rounded-2xl px-4 py-3 text-sm sm:grid-cols-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Selected sheet</p>
+                <p className="mt-1 font-semibold text-[color:var(--text-strong)]">{review.selectedSheetName}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Workbook sheets</p>
+                <p className="mt-1 font-semibold text-[color:var(--text-strong)]">{review.sheetCount}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Rows</p>
+                <p className="mt-1 font-semibold text-[color:var(--text-strong)]">{review.sheetRowCount.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Columns</p>
+                <p className="mt-1 font-semibold text-[color:var(--text-strong)]">{review.sheetColumnCount.toLocaleString()}</p>
+              </div>
+            </section>
+          ) : null}
 
           <div className="mt-4 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
             <section className="rounded-2xl border border-[color:var(--line-soft)] p-4">
@@ -269,33 +369,62 @@ export function SmartUploadAssistant({
               Suggested Company Mapping
             </p>
             <p className="mt-1 text-xs leading-5 text-[color:var(--text-muted)]">
-              AI suggested these account and department mappings. Confirmed
-              mappings are saved into Company Mapping; Needs Review items remain
-              staged and visible in Unmapped Imports.
+              AI suggested this mapping based on the uploaded code and description. Confirm before it
+              becomes part of Company Mapping. Items marked Leave Unmapped remain staged and visible
+              in Unmapped Imports.
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={selectedSuggestionIds.length === 0}
+                onClick={confirmSelectedSuggestions}
+                className="premium-pill h-9 rounded-xl px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Confirm selected mappings
+              </button>
+              <span className="text-xs text-[color:var(--text-muted)]">
+                {selectedSuggestionIds.length} selected
+              </span>
+            </div>
             <div className="mt-3 max-h-80 overflow-auto">
-              <table className="w-full min-w-[980px] text-left text-sm">
+              <table className="w-full min-w-[1120px] text-left text-sm">
                 <thead className="text-xs uppercase tracking-[0.12em] text-[color:var(--text-muted)]">
                   <tr>
+                    <th className="py-2 pr-3 font-medium">Select</th>
+                    <th className="py-2 pr-3 font-medium">Mapping state</th>
                     <th className="py-2 pr-3 font-medium">Raw value</th>
                     <th className="py-2 pr-3 font-medium">Code</th>
                     <th className="py-2 pr-3 font-medium">Account</th>
                     <th className="py-2 pr-3 font-medium">Department</th>
                     <th className="py-2 pr-3 font-medium">FP&A category</th>
                     <th className="py-2 pr-3 font-medium">Confidence</th>
+                    <th className="py-2 pr-3 font-medium">Reason</th>
                     <th className="py-2 font-medium">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {review.suggestedMappings.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-[color:var(--text-muted)]">
+                      <td colSpan={10} className="py-8 text-center text-[color:var(--text-muted)]">
                         No account mappings detected in this file.
                       </td>
                     </tr>
                   ) : (
                     review.suggestedMappings.map((suggestion) => (
                       <tr key={suggestion.id} className="border-t border-[color:var(--line-soft)]">
+                        <td className="py-2 pr-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedSuggestionIds.includes(suggestion.id)}
+                            onChange={(event) => toggleSuggestionSelection(suggestion.id, event.target.checked)}
+                            disabled={suggestion.matchedExisting}
+                          />
+                        </td>
+                        <td className="py-2 pr-3">
+                          <span className="premium-pill rounded-full px-2 py-1 text-xs">
+                            {suggestion.mappingState}
+                          </span>
+                        </td>
                         <td className="py-2 pr-3 text-[color:var(--text-soft)]">{suggestion.rawValue}</td>
                         <td className="py-2 pr-3">
                           <input
@@ -350,6 +479,7 @@ export function SmartUploadAssistant({
                           />
                         </td>
                         <td className="py-2 pr-3 text-[color:var(--text-soft)]">{suggestion.confidence}</td>
+                        <td className="max-w-64 py-2 pr-3 text-xs leading-5 text-[color:var(--text-muted)]">{suggestion.reason}</td>
                         <td className="py-2">
                           <select
                             value={suggestion.action}
@@ -366,8 +496,8 @@ export function SmartUploadAssistant({
                             }
                             className="h-9 rounded-lg border px-2 text-sm"
                           >
-                            <option value="Confirm">Confirm</option>
-                            <option value="Needs Review">Needs Review</option>
+                            <option value="Confirm">Confirm Mapping</option>
+                            <option value="Needs Review">Leave Unmapped</option>
                             <option value="Ignore">Ignore</option>
                           </select>
                         </td>

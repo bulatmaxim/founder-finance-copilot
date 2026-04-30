@@ -135,10 +135,11 @@ export async function saveDepartment(input: Partial<CompanyDepartment>) {
     updated_at: new Date().toISOString(),
   };
   const query = input.id
-    ? supabase.from("company_departments").update(payload).eq("id", input.id)
-    : supabase.from("company_departments").insert(payload);
-  const { error } = await query;
+    ? supabase.from("company_departments").update(payload).eq("id", input.id).select("id").single()
+    : supabase.from("company_departments").insert(payload).select("id").single();
+  const { data, error } = await query;
   if (error) throw new Error(`Department save failed: ${error.message}`);
+  return data?.id ?? input.id ?? null;
 }
 
 export async function saveCompanyAccount(input: Partial<CompanyAccount>) {

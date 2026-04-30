@@ -14,11 +14,15 @@ export type AccountSourceType = string;
 export type AccountMappingRow = {
   id: string | null;
   rawAccountName: string;
+  accountCode: string;
+  departmentCode: string;
   sourceType: AccountSourceType;
   suggestedCategory: string;
   selectedCategory: string;
   suggestedDepartment: string;
   department: string;
+  confidence: "High" | "Medium" | "Low";
+  reason: string;
   status: AccountMappingStatus;
   lastUpdated: string | null;
   firstSeenDate: string | null;
@@ -127,18 +131,25 @@ export async function loadAccountMappingRows() {
       const existing = mappingByName.get(key);
       const suggestion = suggestAccountMapping(rawAccountName);
       const selectedCategory = existing?.normalized_category ?? "";
+      const suggestedCategory = fact.suggestedCategory || suggestion.category;
       const status =
         existing?.status ??
-        (suggestion.category === "Uncategorized" ? "Unmapped" : "Suggested");
+        (suggestedCategory === "Uncategorized" ? "Unmapped" : "Suggested");
 
       return {
         id: existing?.id ?? null,
         rawAccountName,
+        accountCode: fact.accountCode,
+        departmentCode: fact.departmentCode,
         sourceType: formatSourceType(fact.sources),
-        suggestedCategory: suggestion.category,
+        suggestedCategory,
         selectedCategory,
-        suggestedDepartment: suggestion.department,
-        department: existing?.department ?? suggestion.department,
+        suggestedDepartment: fact.suggestedDepartment || suggestion.department,
+        department: existing?.department || fact.suggestedDepartment || suggestion.department,
+        confidence: existing ? "High" : fact.confidence,
+        reason: existing
+          ? "Matched from confirmed Company Mapping."
+          : fact.reason || "Suggested from uploaded account evidence; confirmation is required.",
         status,
         lastUpdated: existing?.updated_at ?? null,
         firstSeenDate: fact.firstSeenDate,
@@ -333,7 +344,13 @@ export function normalizeAccountName(value: string) {
 
 type AccountFact = {
   rawAccountName: string;
+  accountCode: string;
+  departmentCode: string;
   sourceType: string;
+  suggestedCategory: string;
+  suggestedDepartment: string;
+  confidence: "High" | "Medium" | "Low";
+  reason: string;
   firstSeenDate: string | null;
   latestSeenDate: string | null;
   totalAmount: number;
@@ -343,7 +360,13 @@ type AccountFact = {
 
 type AccountAggregate = {
   rawAccountName: string;
+  accountCode: string;
+  departmentCode: string;
   sources: Set<string>;
+  suggestedCategory: string;
+  suggestedDepartment: string;
+  confidence: "High" | "Medium" | "Low";
+  reason: string;
   firstSeenDate: string | null;
   latestSeenDate: string | null;
   totalAmount: number;
@@ -383,7 +406,13 @@ async function loadAccountFacts(
 
     mergeAccountFact(facts, {
       rawAccountName,
+      accountCode: "",
+      departmentCode: "",
       sourceType,
+      suggestedCategory: "",
+      suggestedDepartment: "",
+      confidence: "Low",
+      reason: "",
       firstSeenDate: normalizeMonthDate(String(row.month ?? "")),
       latestSeenDate: normalizeMonthDate(String(row.month ?? "")),
       totalAmount: Number(row.amount ?? 0),
@@ -406,7 +435,7 @@ async function loadStagedAccountFacts() {
   const { data, error } = await supabase
     .from("import_staged_rows")
     .select(
-      "raw_account_name, file_category, period, amount, uploaded_file_id, mapping_status",
+      "raw_account_name, account_code, department_code, department, mapped_category, file_category, period, amount, uploaded_file_id, mapping_status",
     )
     .eq("company_id", company.id)
     .not("raw_account_name", "is", null);
@@ -427,7 +456,18 @@ async function loadStagedAccountFacts() {
 
     mergeAccountFact(facts, {
       rawAccountName,
+      accountCode: String(row.account_code ?? ""),
+      departmentCode: String(row.department_code ?? ""),
       sourceType: sourceTypeForCategory(String(row.file_category ?? "")),
+      suggestedCategory: String(row.mapped_category ?? ""),
+      suggestedDepartment: String(row.department ?? ""),
+      confidence: row.mapping_status === "Mapped" ? "High" : row.mapped_category ? "Medium" : "Low",
+      reason:
+        row.mapping_status === "Mapped"
+          ? "Matched from confirmed Company Mapping."
+          : row.mapped_category
+            ? "Suggested from uploaded description/name; confirmation is required."
+            : "No confirmed account mapping exists for this imported value.",
       firstSeenDate: normalizeMonthDate(String(row.period ?? "")),
       latestSeenDate: normalizeMonthDate(String(row.period ?? "")),
       totalAmount: Number(row.amount ?? 0),
@@ -446,7 +486,13 @@ function mergeAccountFact(facts: Map<string, AccountAggregate>, next: AccountFac
   if (!existing) {
     facts.set(key, {
       rawAccountName: next.rawAccountName,
+      accountCode: next.accountCode,
+      departmentCode: next.departmentCode,
       sources: new Set([next.sourceType]),
+      suggestedCategory: next.suggestedCategory,
+      suggestedDepartment: next.suggestedDepartment,
+      confidence: next.confidence,
+      reason: next.reason,
       firstSeenDate: next.firstSeenDate,
       latestSeenDate: next.latestSeenDate,
       totalAmount: next.totalAmount,
@@ -462,12 +508,26 @@ function mergeAccountFact(facts: Map<string, AccountAggregate>, next: AccountFac
   existing.totalAmount += next.totalAmount;
   existing.rowCount += next.rowCount;
   next.sourceFiles.forEach((sourceFile) => existing.sourceFiles.add(sourceFile));
+  existing.accountCode ||= next.accountCode;
+  existing.departmentCode ||= next.departmentCode;
+  existing.suggestedCategory ||= next.suggestedCategory;
+  existing.suggestedDepartment ||= next.suggestedDepartment;
+  if (existing.confidence === "Low" && next.confidence !== "Low") {
+    existing.confidence = next.confidence;
+  }
+  existing.reason ||= next.reason;
 }
 
 function aggregateToFact(aggregate: AccountAggregate): AccountFact {
   return {
     rawAccountName: aggregate.rawAccountName,
+    accountCode: aggregate.accountCode,
+    departmentCode: aggregate.departmentCode,
     sourceType: formatSourceType(aggregate.sources),
+    suggestedCategory: aggregate.suggestedCategory,
+    suggestedDepartment: aggregate.suggestedDepartment,
+    confidence: aggregate.confidence,
+    reason: aggregate.reason,
     firstSeenDate: aggregate.firstSeenDate,
     latestSeenDate: aggregate.latestSeenDate,
     totalAmount: aggregate.totalAmount,

@@ -164,15 +164,46 @@ export default function AccountMappingPage() {
             <UnmappedImportsTab
               rows={workspace.unmappedImports}
               onSave={(row) =>
-                saveAndReload("Import mapping", () =>
-                  saveAccountMapping({
+                saveAndReload("Import mapping", async () => {
+                  const normalizedCategory = row.selectedCategory || row.suggestedCategory;
+                  const departmentName = row.department || row.suggestedDepartment;
+                  let departmentId =
+                    workspace.departments.find(
+                      (department) =>
+                        department.name.toLowerCase() === departmentName.toLowerCase() ||
+                        (row.departmentCode &&
+                          (department.code ?? "").toLowerCase() === row.departmentCode.toLowerCase()),
+                    )?.id ?? "";
+
+                  if (!departmentId && departmentName) {
+                    departmentId =
+                      (await saveDepartment({
+                        name: departmentName,
+                        code: row.departmentCode || null,
+                        function: departmentName,
+                        is_active: true,
+                      })) ?? "";
+                  }
+
+                  await saveCompanyAccount({
+                    account_name: row.rawAccountName,
+                    account_code: row.accountCode || null,
+                    uploaded_alias: row.rawAccountName,
+                    department_id: departmentId || null,
+                    normalized_category: normalizedCategory,
+                    statement_type: row.sourceType,
+                    notes: row.reason,
+                    is_active: true,
+                  });
+
+                  await saveAccountMapping({
                     rawAccountName: row.rawAccountName,
-                    normalizedCategory: row.selectedCategory || row.suggestedCategory,
-                    department: row.department,
+                    normalizedCategory,
+                    department: departmentName,
                     statementType: row.sourceType,
                     status: "Mapped",
-                  }),
-                )
+                  });
+                })
               }
             />
           ) : null}
@@ -282,19 +313,24 @@ function UnmappedImportsTab({ rows, onSave }: {
       title="Unmapped Imports"
       description="Accounts and codes found in uploaded or staged data that do not yet have a trusted company mapping."
     >
-      <thead><tr><Th>Raw Uploaded Value</Th><Th>Source</Th><Th>Total Amount</Th><Th>Rows</Th><Th>First Seen</Th><Th>Latest Seen</Th><Th>Suggested Mapping</Th><Th>Save Mapping</Th></tr></thead>
+      <thead><tr><Th>Raw Uploaded Value</Th><Th>Account Code</Th><Th>Department Code</Th><Th>Source</Th><Th>Total Amount</Th><Th>Rows</Th><Th>Period Range</Th><Th>Suggested Department</Th><Th>Suggested FP&A Category</Th><Th>Confidence</Th><Th>Reason</Th><Th>Status</Th><Th>Action</Th></tr></thead>
       <tbody>
-        {drafts.length === 0 ? <tr><td colSpan={8} className="px-4 py-10 text-center text-[color:var(--text-muted)]">No unmapped imports right now.</td></tr> : null}
+        {drafts.length === 0 ? <tr><td colSpan={13} className="px-4 py-10 text-center text-[color:var(--text-muted)]">No unmapped imports right now.</td></tr> : null}
         {drafts.map((row, index) => (
           <tr key={row.rawAccountName} className="border-b border-white/10">
             <Td>{row.rawAccountName}</Td>
+            <Td>{row.accountCode || "-"}</Td>
+            <Td>{row.departmentCode || "-"}</Td>
             <Td>{row.sourceType}</Td>
             <Td>{formatCurrency(row.totalAmount)}</Td>
             <Td>{row.rowCount}</Td>
-            <Td>{row.firstSeenDate ?? "-"}</Td>
-            <Td>{row.latestSeenDate ?? "-"}</Td>
+            <Td>{row.firstSeenDate ?? "-"} to {row.latestSeenDate ?? "-"}</Td>
+            <Td><Input value={row.department || row.suggestedDepartment} onChange={(department) => setDrafts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, department } : item))} /></Td>
             <Td><CategorySelect value={row.selectedCategory || row.suggestedCategory} onChange={(selectedCategory) => setDrafts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, selectedCategory } : item))} /></Td>
-            <Td><SaveButton disabled={false} onClick={() => onSave(drafts[index])} /></Td>
+            <Td>{row.confidence}</Td>
+            <Td><span className="block max-w-72 text-xs leading-5 text-[color:var(--text-muted)]">{row.reason}</span></Td>
+            <Td><span className="premium-pill rounded-full px-2 py-1 text-xs">{row.status}</span></Td>
+            <Td><SaveButton disabled={!(row.selectedCategory || row.suggestedCategory)} onClick={() => onSave(drafts[index])} /></Td>
           </tr>
         ))}
       </tbody>

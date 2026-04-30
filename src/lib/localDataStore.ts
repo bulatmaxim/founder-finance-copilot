@@ -1319,6 +1319,16 @@ function clearUploadedRows(key: string) {
   window.localStorage.removeItem(key);
 }
 
+export function clearAllLocalAppData() {
+  if (!canUseLocalStorage()) {
+    return;
+  }
+
+  Object.keys(window.localStorage)
+    .filter((key) => key.startsWith("founder-finance-copilot:"))
+    .forEach((key) => window.localStorage.removeItem(key));
+}
+
 function chooseForecastVersion(rows: UploadedForecastRow[]) {
   const counts = new Map<string, number>();
 
