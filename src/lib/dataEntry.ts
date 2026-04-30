@@ -81,6 +81,7 @@ export type DataEntrySavePreview = {
 export type YearlyDataEntryRow = {
   id: string;
   accountName: string;
+  accountCode: string;
   department: string;
   category: string;
   notes: string;
@@ -537,6 +538,7 @@ export function createBlankYearlyDataEntryRow(): YearlyDataEntryRow {
   return {
     id: `new-${crypto.randomUUID()}`,
     accountName: "",
+    accountCode: "",
     department: "",
     category: "",
     notes: "",
@@ -691,6 +693,7 @@ export async function saveYearlyDataEntryRows({
           department: row.department || null,
           amount: parseAmount(amount),
           raw_data: {
+            account_code: row.accountCode || null,
             notes: row.notes,
             source_type: "Manual Entry",
             yearly_grid: true,
@@ -797,16 +800,18 @@ function yearlyRowsFromStagedRows(rows: StagedRowRecord[], reportingYear: number
   rows.forEach((row) => {
     const rawData = normalizeRawData(row.raw_data);
     const accountName = row.raw_account_name ?? rawData.account_name ?? "Unlabeled row";
+    const accountCode = rawData.account_code ?? "";
     const category = row.mapped_category ?? row.raw_category ?? "";
     const department = row.department ?? "";
     const notes = rawData.notes ?? "";
-    const key = `${accountName}|${department}|${category}`;
+    const key = `${accountName}|${accountCode}|${department}|${category}`;
     const period = normalizeYearMonth(row.period ?? "");
 
     if (!grouped.has(key)) {
       grouped.set(key, {
         id: key,
         accountName,
+        accountCode,
         department,
         category,
         notes,
@@ -863,7 +868,7 @@ async function loadYearlyRowsFromReportingTables({
       mapped_category: String(row.category ?? ""),
       department: null,
       amount: Number(row.amount ?? 0),
-      raw_data: { source_type: "Reporting Table" },
+      raw_data: { account_code: "", source_type: "Reporting Table" },
       mapping_status: "Mapped" as const,
       validation_status: "Valid" as const,
     }));
@@ -894,7 +899,7 @@ async function loadYearlyRowsFromReportingTables({
         mapped_category: "Cash Report",
         department: null,
         amount: Number(row.cash_balance ?? 0),
-        raw_data: { source_type: "Reporting Table" },
+        raw_data: { account_code: "", source_type: "Reporting Table" },
         mapping_status: "Mapped" as const,
         validation_status: "Valid" as const,
       })),
@@ -1027,6 +1032,7 @@ function changedMonths(
 function yearlyRowSignature(row: YearlyDataEntryRow) {
   return JSON.stringify({
     accountName: row.accountName,
+    accountCode: row.accountCode,
     department: row.department,
     category: row.category,
     notes: row.notes,

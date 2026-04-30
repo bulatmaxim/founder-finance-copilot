@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { Toast, type ToastMessage, type ToastType } from "@/components/Toast";
 import { SmartUploadAssistant } from "@/components/SmartUploadAssistant";
-import { sampleCompany } from "@/data/sampleCompany";
 import {
   bankTransactionsSampleCsv,
   budgetSampleCsv,
@@ -335,23 +335,28 @@ export default function UploadsPage() {
     <section className="space-y-8">
       <Toast message={toast} onClose={() => setToast(null)} />
 
-      <div>
-        <p className="text-sm font-medium uppercase tracking-[0.12em] text-neutral-500">
-          Uploads
+      <div className="premium-card rounded-3xl p-6">
+        <p className="text-sm font-medium uppercase tracking-[0.18em] text-sky-200/70">
+          Upload Data
         </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-          Financial Data Intake
+        <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[color:var(--text-strong)]">
+          Upload Data
         </h1>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
-          Local intake center for {sampleCompany.name}. Upload CSVs, validate
-          them in the browser, and save parsed data to Supabase when signed in.
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-[color:var(--text-muted)]">
+          Upload company financial files, let Smart Upload classify them, and
+          stage them for mapping, validation, and monthly close review.
         </p>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-500">
-          Uploaded actuals, budget, cash, payroll, revenue, pipeline, bank, and
-          forecast data are stored in Supabase for this company when configured.
-          If Supabase is unavailable, the localStorage fallback remains active
-          for development.
-        </p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Link href="/data-room" className="premium-pill inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium">
+            Review in Data Room
+          </Link>
+          <Link href="/account-mapping" className="premium-pill inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium">
+            Company Mapping
+          </Link>
+          <Link href="/data-entry" className="premium-pill inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium">
+            Data Entry
+          </Link>
+        </div>
       </div>
 
       <SmartUploadAssistant

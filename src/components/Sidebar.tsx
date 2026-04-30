@@ -11,7 +11,7 @@ const navigationGroups = [
       { name: "Dashboard", href: "/dashboard", code: "DB" },
       { name: "Data Room", href: "/data-room", code: "DR" },
       { name: "Data Entry", href: "/data-entry", code: "DE" },
-      { name: "Uploads", href: "/uploads", code: "UP" },
+      { name: "Upload Data", href: "/uploads", code: "UP" },
       { name: "Company Mapping", href: "/account-mapping", code: "CM" },
     ],
   },

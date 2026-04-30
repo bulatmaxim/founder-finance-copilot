@@ -7,16 +7,13 @@ import { MonthlyCloseSummaryCards } from "@/components/data-room/MonthlyCloseSum
 import { Toast, type ToastMessage, type ToastType } from "@/components/Toast";
 import {
   collectValidationIssues,
-  formatReportingMonth,
   getOverallCloseStatus,
   getReportingMonthOptions,
   loadMonthlyCloseItems,
   reportingMonthKey,
   removeMonthlyCloseFile,
   updateMonthlyCloseItemStatus,
-  uploadMonthlyCloseFile,
   type MonthlyCloseActivity,
-  type MonthlyCloseCategory,
   type MonthlyCloseItem,
   type MonthlyCloseStatus,
 } from "@/lib/monthlyClose";
@@ -39,8 +36,6 @@ export default function DataRoomPage() {
   const [activity, setActivity] = useState<MonthlyCloseActivity[]>([]);
   const [companyName, setCompanyName] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [uploadingCategory, setUploadingCategory] =
-    useState<MonthlyCloseCategory | null>(null);
   const [savingItemId, setSavingItemId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
@@ -84,41 +79,6 @@ export default function DataRoomPage() {
     return () => window.clearTimeout(timer);
   }, [loadChecklist, selectedMonth]);
 
-  async function handleUpload(category: MonthlyCloseCategory, file: File) {
-    if (!selectedMonth) {
-      notify("error", "Select a reporting month before uploading.");
-      return;
-    }
-
-    setUploadingCategory(category);
-
-    try {
-      const result = await uploadMonthlyCloseFile({
-        reportingMonth: selectedMonth,
-        fileCategory: category,
-        file,
-      });
-      setItems(result.items);
-      setActivity(result.activity);
-      setCompanyName(result.company.name);
-      await hydrateLocalDataFromSupabase();
-      notify(
-        "success",
-        "File uploaded.",
-        `${file.name} was saved for ${formatReportingMonth(selectedMonth)}.`,
-      );
-    } catch (error) {
-      console.error("Data Room upload failed", error);
-      notify(
-        "error",
-        "Upload failed.",
-        error instanceof Error ? error.message : "Check the file and try again.",
-      );
-    } finally {
-      setUploadingCategory(null);
-    }
-  }
-
   async function handleStatusChange(
     item: MonthlyCloseItem,
     status: Exclude<MonthlyCloseStatus, "Not uploaded">,
@@ -144,13 +104,13 @@ export default function DataRoomPage() {
   }
 
   async function handleRemove(item: MonthlyCloseItem) {
-    if (!item.uploaded_file_id) {
-      notify("info", "No uploaded file to remove.");
+    if (!item.uploaded_file_id && !item.import_batch?.id) {
+      notify("info", "No submitted data to remove.");
       return;
     }
 
     const confirmed = window.confirm(
-      `Remove ${item.file_name ?? "this file"} from the monthly close checklist? Parsed dashboard data will not be deleted.`,
+      `Remove ${item.file_name ?? "this worksheet"} from the monthly close checklist? Parsed dashboard data will not be deleted.`,
     );
 
     if (!confirmed) {
@@ -164,7 +124,7 @@ export default function DataRoomPage() {
       setItems(result.items);
       setActivity(result.activity);
       await hydrateLocalDataFromSupabase();
-      notify("success", "File removed from checklist.");
+      notify("success", "Data removed from monthly close review.");
     } catch (error) {
       console.error("Monthly close file removal failed", error);
       notify(
@@ -191,8 +151,8 @@ export default function DataRoomPage() {
               Monthly Close Data Room
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-              Upload, validate, and approve monthly financial data before
-              reports and CFO insights are generated.
+              Review close status, validation, mapping readiness, approvals,
+              and activity for data submitted through Upload Data or Data Entry.
             </p>
           </div>
 
@@ -257,10 +217,7 @@ export default function DataRoomPage() {
           <MonthlyCloseChecklist
             items={items}
             reportingMonth={selectedMonth}
-            uploadingCategory={uploadingCategory}
             savingItemId={savingItemId}
-            reviewOnly
-            onUpload={(category, file) => void handleUpload(category, file)}
             onStatusChange={(item, status) =>
               void handleStatusChange(item, status)
             }
@@ -268,7 +225,7 @@ export default function DataRoomPage() {
           />
           <DataQualityPanel
             issues={validationIssues}
-            isLoading={Boolean(uploadingCategory)}
+            isLoading={false}
           />
           <RecentActivity activity={activity} />
         </>

@@ -353,10 +353,11 @@ function YearlyGrid({
         </button>
       </div>
       <div className="max-h-[680px] overflow-auto">
-        <table className="w-full min-w-[1680px] border-separate border-spacing-0 text-sm">
+        <table className="w-full min-w-[1800px] border-separate border-spacing-0 text-sm">
           <thead className="sticky top-0 z-[1]">
             <tr>
               <th className="w-64 px-3 py-3 text-left font-medium">Account / Line Item</th>
+              <th className="w-36 px-3 py-3 text-left font-medium">Account Code</th>
               <th className="w-48 px-3 py-3 text-left font-medium">Department</th>
               <th className="w-56 px-3 py-3 text-left font-medium">Category</th>
               {monthLabels.map((month) => (
@@ -372,7 +373,7 @@ function YearlyGrid({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={18} className="px-4 py-12 text-center text-[color:var(--text-muted)]">
+                <td colSpan={19} className="px-4 py-12 text-center text-[color:var(--text-muted)]">
                   No rows found for this year. Add a line item to start.
                 </td>
               </tr>
@@ -383,6 +384,13 @@ function YearlyGrid({
                     <input
                       value={row.accountName}
                       onChange={(event) => onUpdateRow(row.id, { accountName: event.target.value })}
+                      className="h-9 w-full rounded-lg border px-2 text-sm"
+                    />
+                  </td>
+                  <td className="px-2 py-2">
+                    <input
+                      value={row.accountCode}
+                      onChange={(event) => onUpdateRow(row.id, { accountCode: event.target.value })}
                       className="h-9 w-full rounded-lg border px-2 text-sm"
                     />
                   </td>
@@ -466,7 +474,7 @@ function ConfirmYearlySaveModal({
         <p className="mt-3 text-sm leading-6 text-[color:var(--text-muted)]">
           You are about to save manual changes to financial data for this
           reporting year. These changes may affect dashboards, CFO Briefs,
-          forecasts, reports, and exported decks.
+          forecasts, reports, decision memos, and exported decks.
         </p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <ConfirmMetric label="Reporting year" value={String(reportingYear)} />
