@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Toast, type ToastMessage, type ToastType } from "@/components/Toast";
+import {
+  loadDecisionMemos,
+  type DecisionMemoRecord,
+} from "@/lib/decisionMemos";
 import { loadAccountMappingSummary } from "@/lib/accountMapping";
 import {
   loadForecastDriverAssumptionRecords,
@@ -92,6 +96,8 @@ export default function ReportsPage() {
   const [reportId, setReportId] = useState<string | null>(null);
   const [closeItems, setCloseItems] = useState<MonthlyCloseItem[]>([]);
   const [forecastVersions, setForecastVersions] = useState<ForecastVersionRecord[]>([]);
+  const [decisionMemos, setDecisionMemos] = useState<DecisionMemoRecord[]>([]);
+  const [decisionMemoId, setDecisionMemoId] = useState("");
   const [companyContext, setCompanyContext] = useState({
     name: "",
     industry: "",
@@ -116,6 +122,9 @@ export default function ReportsPage() {
 
   const selectedForecastVersion =
     forecastVersions.find((version) => version.id === forecastVersionId) ?? null;
+  const selectedDecisionMemo =
+    decisionMemos.find((memo) => memo.id === decisionMemoId) ?? decisionMemos[0] ?? null;
+  const isDecisionMemoReport = reportType === "Decision Memo";
   const closeStatus = getOverallCloseStatus(closeItems);
   const readinessItems = buildReadinessItems({
     closeItems,
@@ -124,8 +133,12 @@ export default function ReportsPage() {
   });
   const closeIssues = collectValidationIssues(closeItems);
   const actualsAvailable = activeData.periods.length > 0;
-  const reportTitle = `${reportType} - ${formatReportingMonth(reportingMonth)}`;
-  const dataSource = buildReportDataSource({
+  const reportTitle =
+    isDecisionMemoReport && selectedDecisionMemo?.title
+      ? selectedDecisionMemo.title
+      : `${reportType} - ${formatReportingMonth(reportingMonth)}`;
+  const dataSource = {
+    ...buildReportDataSource({
     reportingMonth,
     reportType,
     forecastVersionId: selectedForecastVersion?.id ?? null,
@@ -133,7 +146,20 @@ export default function ReportsPage() {
     closeStatus,
     mappingWarning,
     forecastDriverSummary,
-  });
+    }),
+    decisionMemoId: isDecisionMemoReport ? selectedDecisionMemo?.id ?? null : null,
+    decisionTitle: isDecisionMemoReport ? selectedDecisionMemo?.title ?? null : null,
+    decisionType: isDecisionMemoReport ? selectedDecisionMemo?.decision_type ?? null : null,
+    decisionRecommendation: isDecisionMemoReport
+      ? selectedDecisionMemo?.recommendation ?? null
+      : null,
+    decisionCreatedAt: isDecisionMemoReport
+      ? selectedDecisionMemo?.created_at ?? null
+      : null,
+    decisionDataWarnings: isDecisionMemoReport
+      ? selectedDecisionMemo?.analysis?.dataWarnings ?? []
+      : [],
+  };
   const latestActual = activeData.periods.find(
     (period) => period.month === formatReportingMonth(reportingMonth),
   ) ?? activeData.periods.at(-1);
@@ -151,11 +177,12 @@ export default function ReportsPage() {
       setActiveData(getActiveFinancialData());
       setActiveCash(getActiveCashData());
 
-      const [closeResult, mappings, versions, reportHistory] = await Promise.all([
+      const [closeResult, mappings, versions, reportHistory, memos] = await Promise.all([
         loadMonthlyCloseItems(reportingMonth),
         loadAccountMappingSummary(),
         loadForecastVersions(),
         loadMonthlyReportHistory(),
+        loadDecisionMemos(),
       ]);
 
       setCloseItems(closeResult.items);
@@ -165,12 +192,14 @@ export default function ReportsPage() {
       });
       setForecastVersions(versions);
       setHistory(reportHistory);
+      setDecisionMemos(memos);
       setMappingWarning(
         mappings.unmappedAccounts > 0 || mappings.needsReview > 0
           ? `${mappings.unmappedAccounts} unmapped account${mappings.unmappedAccounts === 1 ? "" : "s"} and ${mappings.needsReview} mapping${mappings.needsReview === 1 ? "" : "s"} needing review.`
           : null,
       );
       setForecastVersionId((current) => current || versions[0]?.id || "");
+      setDecisionMemoId((current) => current || memos[0]?.id || "");
     } catch (error) {
       console.error("Report builder load failed", error);
       notify(
@@ -190,6 +219,24 @@ export default function ReportsPage() {
 
     return () => window.clearTimeout(timeout);
   }, [loadPageData]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const type = params.get("type");
+      const memoId = params.get("decisionMemoId");
+
+      if (type === "Decision Memo") {
+        setReportType("Decision Memo");
+      }
+
+      if (memoId) {
+        setDecisionMemoId(memoId);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -223,16 +270,25 @@ export default function ReportsPage() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      setCommentary(
-        buildDefaultReportCommentary(
-          reportingMonth,
-          selectedForecastVersion?.name ?? undefined,
-        ),
-      );
+      if (isDecisionMemoReport && selectedDecisionMemo) {
+        setCommentary(buildDecisionMemoReportCommentary(selectedDecisionMemo));
+      } else {
+        setCommentary(
+          buildDefaultReportCommentary(
+            reportingMonth,
+            selectedForecastVersion?.name ?? undefined,
+          ),
+        );
+      }
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, [reportingMonth, selectedForecastVersion?.name]);
+  }, [
+    isDecisionMemoReport,
+    reportingMonth,
+    selectedDecisionMemo,
+    selectedForecastVersion?.name,
+  ]);
 
   function updateSection(key: keyof MonthlyReportSections, value: boolean) {
     setSections((current) => ({ ...current, [key]: value }));
@@ -274,8 +330,13 @@ export default function ReportsPage() {
   }
 
   async function handleExport() {
-    if (!actualsAvailable) {
+    if (!actualsAvailable && !isDecisionMemoReport) {
       notify("error", "Report cannot be exported.", "No actual data is available.");
+      return;
+    }
+
+    if (isDecisionMemoReport && !selectedDecisionMemo) {
+      notify("error", "Report cannot be exported.", "Select a saved Decision Memo first.");
       return;
     }
 
@@ -310,6 +371,7 @@ export default function ReportsPage() {
           dataSource,
           forecastVersionName: selectedForecastVersion?.name ?? null,
           closeStatus,
+          decisionMemo: selectedDecisionMemo,
         },
       });
       let storagePath: string | null = null;
@@ -408,7 +470,11 @@ export default function ReportsPage() {
           </button>
           <button
             type="button"
-            disabled={isExporting || !actualsAvailable}
+            disabled={
+              isExporting ||
+              (!actualsAvailable && !isDecisionMemoReport) ||
+              (isDecisionMemoReport && !selectedDecisionMemo)
+            }
             onClick={() => void handleExport()}
             className="h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
           >
@@ -423,6 +489,8 @@ export default function ReportsPage() {
         reportType={reportType}
         forecastVersionId={forecastVersionId}
         forecastVersions={forecastVersions}
+        decisionMemoId={decisionMemoId}
+        decisionMemos={decisionMemos}
         sections={sections}
         onMonthChange={(value) => {
           setReportingMonth(value);
@@ -430,6 +498,7 @@ export default function ReportsPage() {
         }}
         onReportTypeChange={setReportType}
         onForecastVersionChange={setForecastVersionId}
+        onDecisionMemoChange={setDecisionMemoId}
         onSectionChange={updateSection}
       />
 
@@ -459,6 +528,7 @@ export default function ReportsPage() {
         latestCash={latestCash}
         selectedForecastVersion={selectedForecastVersion}
         forecastDriverSummary={forecastDriverSummary}
+        selectedDecisionMemo={isDecisionMemoReport ? selectedDecisionMemo : null}
         onCommentaryChange={updateCommentary}
       />
 
@@ -484,6 +554,12 @@ function ReportSourcePanel({
       "Forecast version",
       String(dataSource.forecastVersionName ?? "No saved forecast selected"),
     ],
+    ...(dataSource.decisionMemoId
+      ? [
+          ["Decision memo", String(dataSource.decisionTitle ?? "Selected memo")],
+          ["Decision recommendation", String(dataSource.decisionRecommendation ?? "Unknown")],
+        ]
+      : []),
   ];
 
   return (
@@ -509,10 +585,13 @@ function ReportSetupPanel({
   reportType,
   forecastVersionId,
   forecastVersions,
+  decisionMemoId,
+  decisionMemos,
   sections,
   onMonthChange,
   onReportTypeChange,
   onForecastVersionChange,
+  onDecisionMemoChange,
   onSectionChange,
 }: {
   reportingMonth: string;
@@ -520,10 +599,13 @@ function ReportSetupPanel({
   reportType: MonthlyReportType;
   forecastVersionId: string;
   forecastVersions: ForecastVersionRecord[];
+  decisionMemoId: string;
+  decisionMemos: DecisionMemoRecord[];
   sections: MonthlyReportSections;
   onMonthChange: (value: string) => void;
   onReportTypeChange: (value: MonthlyReportType) => void;
   onForecastVersionChange: (value: string) => void;
+  onDecisionMemoChange: (value: string) => void;
   onSectionChange: (key: keyof MonthlyReportSections, value: boolean) => void;
 }) {
   return (
@@ -575,6 +657,26 @@ function ReportSetupPanel({
             ))}
           </select>
         </label>
+        {reportType === "Decision Memo" ? (
+          <label className="text-sm font-medium text-neutral-700">
+            Saved Decision Memo
+            <select
+              value={decisionMemoId}
+              onChange={(event) => onDecisionMemoChange(event.target.value)}
+              className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none focus:border-neutral-950"
+            >
+              {decisionMemos.length === 0 ? (
+                <option value="">No saved decision memos</option>
+              ) : (
+                decisionMemos.map((memo) => (
+                  <option key={memo.id} value={memo.id}>
+                    {memo.title || memo.decision_prompt || "Untitled decision memo"}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+        ) : null}
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -650,6 +752,7 @@ function ReportPreview({
   latestCash,
   selectedForecastVersion,
   forecastDriverSummary,
+  selectedDecisionMemo,
   onCommentaryChange,
 }: {
   reportTitle: string;
@@ -662,8 +765,20 @@ function ReportPreview({
   latestCash: ActiveCashData["periods"][number] | undefined;
   selectedForecastVersion: ForecastVersionRecord | null;
   forecastDriverSummary: string | null;
+  selectedDecisionMemo: DecisionMemoRecord | null;
   onCommentaryChange: (key: keyof MonthlyReportCommentary, value: string) => void;
 }) {
+  if (reportType === "Decision Memo") {
+    return (
+      <DecisionMemoReportPreview
+        reportTitle={reportTitle}
+        memo={selectedDecisionMemo}
+        commentary={commentary}
+        onCommentaryChange={onCommentaryChange}
+      />
+    );
+  }
+
   return (
     <section className="space-y-6">
       <div>
@@ -804,6 +919,105 @@ function EditableSection({
   );
 }
 
+function DecisionMemoReportPreview({
+  reportTitle,
+  memo,
+  commentary,
+  onCommentaryChange,
+}: {
+  reportTitle: string;
+  memo: DecisionMemoRecord | null;
+  commentary: MonthlyReportCommentary;
+  onCommentaryChange: (key: keyof MonthlyReportCommentary, value: string) => void;
+}) {
+  const analysis = memo?.analysis;
+
+  if (!memo || !analysis) {
+    return (
+      <section className="rounded-md border border-neutral-200 bg-white p-6">
+        <h2 className="text-base font-semibold">Decision Memo Preview</h2>
+        <p className="mt-2 text-sm leading-6 text-neutral-600">
+          Select a saved Decision Memo to populate the report preview and deck export.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold">Decision Memo Preview</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          {reportTitle}. Edit narrative sections before export if needed.
+        </p>
+      </div>
+
+      <section className="rounded-md border border-neutral-200 bg-white p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+              Management decision memo
+            </p>
+            <h3 className="mt-2 text-xl font-semibold">
+              {memo.title || memo.decision_prompt || "Decision Memo"}
+            </h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
+              {memo.decision_prompt}
+            </p>
+          </div>
+          <span className="rounded-md border border-neutral-200 px-3 py-2 text-sm font-semibold text-neutral-800">
+            {analysis.recommendation}
+          </span>
+        </div>
+      </section>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <EditableSection
+          title="CFO Summary"
+          value={commentary.executiveSummary}
+          onChange={(value) => onCommentaryChange("executiveSummary", value)}
+        />
+        <EditableSection
+          title="Financial Impact"
+          value={commentary.cashCommentary}
+          onChange={(value) => onCommentaryChange("cashCommentary", value)}
+        />
+        <EditableSection
+          title="Key Assumptions"
+          value={commentary.forecastCommentary}
+          onChange={(value) => onCommentaryChange("forecastCommentary", value)}
+        />
+        <EditableSection
+          title="Risks"
+          value={commentary.risks}
+          onChange={(value) => onCommentaryChange("risks", value)}
+        />
+        <EditableSection
+          title="Recommended Next Steps"
+          value={commentary.recommendations}
+          onChange={(value) => onCommentaryChange("recommendations", value)}
+        />
+        <section className="rounded-md border border-neutral-200 bg-white p-5">
+          <h3 className="text-base font-semibold">Scenario View</h3>
+          <div className="mt-4 space-y-3">
+            {analysis.scenarios.map((scenario) => (
+              <article key={scenario.name} className="rounded-md border border-neutral-200 p-3">
+                <p className="text-sm font-semibold">{scenario.name}</p>
+                <p className="mt-1 text-sm leading-6 text-neutral-600">
+                  {scenario.summary}
+                </p>
+                <p className="mt-1 text-xs text-neutral-500">
+                  Cash: {scenario.cashImpact}. Runway: {scenario.runwayImpact}.
+                </p>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function ReportHistoryTable({
   reports,
   onDownload,
@@ -916,6 +1130,40 @@ function buildReadinessItems({
         : "No saved forecast version selected.",
     },
   ];
+}
+
+function buildDecisionMemoReportCommentary(
+  memo: DecisionMemoRecord,
+): MonthlyReportCommentary {
+  const analysis = memo.analysis;
+
+  if (!analysis) {
+    return buildDefaultReportCommentary(currentMonthValue());
+  }
+
+  return {
+    executiveSummary: analysis.cfoSummary,
+    revenueCommentary: memo.decision_prompt ?? "",
+    expenseCommentary: analysis.financialImpact.ebitdaOperatingExpenseImpact,
+    cashCommentary: [
+      `Upfront cost: ${analysis.financialImpact.upfrontCost}`,
+      `Monthly recurring impact: ${analysis.financialImpact.monthlyRecurringImpact}`,
+      `Cash balance impact: ${analysis.financialImpact.cashBalanceImpact}`,
+      `Runway impact: ${analysis.financialImpact.runwayImpact}`,
+      `Payback / ROI: ${analysis.financialImpact.paybackRoi}`,
+    ].join("\n"),
+    forecastCommentary: [
+      `Recommendation: ${analysis.recommendation}`,
+      `Forecast impact: ${analysis.financialImpact.forecastImpact}`,
+      "",
+      "Key assumptions:",
+      ...analysis.keyAssumptions.map((item) => `- ${item}`),
+    ].join("\n"),
+    risks: analysis.risks
+      .map((risk) => `${risk.severity} ${risk.category}: ${risk.description} Mitigation: ${risk.mitigation}`)
+      .join("\n"),
+    recommendations: analysis.recommendedNextSteps.map((step) => `- ${step}`).join("\n"),
+  };
 }
 
 function currentMonthValue() {

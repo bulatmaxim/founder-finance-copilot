@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Toast, type ToastMessage, type ToastType } from "@/components/Toast";
+import { saveDecisionMemo as saveDecisionMemoRecord } from "@/lib/decisionMemos";
 import { formatCurrency, formatRunwayMonths } from "@/lib/formatting";
 import {
   getActiveBudgetData,
@@ -18,8 +20,6 @@ import {
   loadForecastVersionsForDisplay,
   type ForecastVersionWithRows,
 } from "@/lib/forecastVersions";
-import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
-import { getCurrentCompany } from "@/lib/supabase/data";
 
 type DecisionType =
   | "Hiring"
@@ -111,6 +111,7 @@ export default function DecisionCenterPage() {
   const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSavingMemo, setIsSavingMemo] = useState(false);
+  const [savedMemoId, setSavedMemoId] = useState("");
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
   const activeData = useMemo(() => getActiveFinancialData(), []);
@@ -239,6 +240,7 @@ export default function DecisionCenterPage() {
       }
 
       setAnalysis(payload.analysis);
+      setSavedMemoId("");
       notify(
         "success",
         "Decision analysis complete.",
@@ -262,38 +264,20 @@ export default function DecisionCenterPage() {
       return;
     }
 
-    if (!hasSupabaseBrowserEnv()) {
-      notify("error", "Supabase is not configured.");
-      return;
-    }
-
     setIsSavingMemo(true);
 
     try {
-      const { user, company } = await getCurrentCompany();
-
-      if (!user || !company) {
-        throw new Error("Log in and complete a company profile before saving a memo.");
-      }
-
-      const supabase = createClient();
-      const { error } = await supabase.from("decision_memos").insert({
-        user_id: user.id,
-        company_id: company.id,
+      const memo = await saveDecisionMemoRecord({
         title: decisionPrompt.slice(0, 120),
-        decision_type: questionResponse.decisionType,
-        decision_prompt: decisionPrompt,
+        decisionType: questionResponse.decisionType,
+        decisionPrompt: decisionPrompt,
         questions: questionResponse.questions,
         answers,
         analysis,
         recommendation: analysis.recommendation,
-        status: "Draft",
       });
 
-      if (error) {
-        throw new Error(error.message);
-      }
-
+      setSavedMemoId(memo.id);
       notify("success", "Decision memo saved.", "Saved as a Draft decision memo.");
     } catch (error) {
       console.error("Decision memo save failed", error);
@@ -421,6 +405,7 @@ export default function DecisionCenterPage() {
           isSavingMemo={isSavingMemo}
           onSaveMemo={() => void saveDecisionMemo()}
           onCopySummary={() => void copySummary()}
+          savedMemoId={savedMemoId}
         />
       ) : (
         <section className="premium-card p-6">
@@ -607,11 +592,13 @@ function ContextPanel({
 function AnalysisPanel({
   analysis,
   isSavingMemo,
+  savedMemoId,
   onSaveMemo,
   onCopySummary,
 }: {
   analysis: DecisionAnalysis;
   isSavingMemo: boolean;
+  savedMemoId: string;
   onSaveMemo: () => void;
   onCopySummary: () => void;
 }) {
@@ -646,6 +633,24 @@ function AnalysisPanel({
           >
             {isSavingMemo ? "Saving..." : "Save Decision Memo"}
           </button>
+          {savedMemoId ? (
+            <>
+              <Link
+                href={`/reports?type=Decision%20Memo&decisionMemoId=${savedMemoId}`}
+                prefetch={false}
+                className="inline-flex h-10 items-center rounded-md border border-[var(--line-soft)] px-4 text-sm font-medium"
+              >
+                Open in Reports
+              </Link>
+              <Link
+                href={`/reports?type=Decision%20Memo&decisionMemoId=${savedMemoId}`}
+                prefetch={false}
+                className="inline-flex h-10 items-center rounded-md border border-[var(--line-soft)] px-4 text-sm font-medium"
+              >
+                Create Decision Memo Report
+              </Link>
+            </>
+          ) : null}
         </div>
       </div>
 

@@ -2,6 +2,7 @@
 
 import type PptxGenJS from "pptxgenjs";
 import { sampleCompany } from "@/data/sampleCompany";
+import type { DecisionMemoRecord } from "@/lib/decisionMemos";
 import {
   calculateVarianceDollars,
   calculateVariancePercent,
@@ -72,6 +73,7 @@ export type PowerPointReportMetadata = {
   dataSource?: Record<string, unknown> | null;
   forecastVersionName?: string | null;
   closeStatus?: string | null;
+  decisionMemo?: DecisionMemoRecord | null;
 };
 
 type MetricRow = {
@@ -136,7 +138,7 @@ export async function generateMonthlyCfoDeck({
   validateDeckContext(context);
 
   const pptx = createDeck(PptxGenJSConstructor, context);
-  const builders = getSlideBuilders(context.sections);
+  const builders = getSlideBuilders(context.sections, context);
 
   builders.forEach((builder, index) => {
     const slide = pptx.addSlide();
@@ -280,6 +282,7 @@ function buildDeckContext(
     trendMonths,
     uploadedDataNotes,
     dataSource,
+    decisionMemo: metadata.decisionMemo ?? null,
   };
 }
 
@@ -350,6 +353,13 @@ function validateDeckContext(context: DeckContext) {
 
   if (!context.companyName) missing.push("company name");
   if (!context.reportingMonth) missing.push("reporting month");
+  if (context.reportType === "Decision Memo") {
+    if (!context.decisionMemo) missing.push("decision memo");
+    if (missing.length > 0) {
+      throw new Error(`Cannot generate PowerPoint: missing ${missing.join(", ")}.`);
+    }
+    return;
+  }
   if (!context.actual) missing.push("financial data");
   if (!context.budget) missing.push("budget data");
 
@@ -358,7 +368,21 @@ function validateDeckContext(context: DeckContext) {
   }
 }
 
-function getSlideBuilders(sections: Required<PowerPointReportSections>) {
+function getSlideBuilders(
+  sections: Required<PowerPointReportSections>,
+  context: DeckContext,
+) {
+  if (context.reportType === "Decision Memo" && context.decisionMemo) {
+    return [
+      addTitleSlide,
+      addDecisionSummarySlide,
+      addDecisionImpactSlide,
+      addDecisionScenarioSlide,
+      addDecisionRisksSlide,
+      addDecisionAppendixSlide,
+    ];
+  }
+
   const builders: ((slide: Slide, context: DeckContext, pageNumber: number) => void)[] = [
     addTitleSlide,
   ];
@@ -459,6 +483,174 @@ function addExecutiveSummarySlide(
     3.1,
   );
   addSourcePanel(slide, context, 8.35, 1.28, 3.95, 3.95);
+}
+
+function addDecisionSummarySlide(
+  slide: Slide,
+  context: DeckContext,
+  pageNumber: number,
+) {
+  addSlideShell(slide, "Decision Recommendation", context, pageNumber);
+  const memo = context.decisionMemo;
+  const analysis = memo?.analysis;
+
+  addStatement(
+    slide,
+    `${analysis?.recommendation ?? "Recommendation pending"}: ${firstSentence(analysis?.cfoSummary ?? "Decision memo analysis is not available.")}`,
+    0.82,
+    1.22,
+    7.25,
+  );
+  addMiniTable(
+    slide,
+    "Decision Context",
+    [
+      ["Field", "Detail"],
+      ["Decision", shorten(memo?.decision_prompt ?? memo?.title ?? "Decision memo", 78)],
+      ["Type", memo?.decision_type ?? "Not classified"],
+      ["Created", formatDeckDate(memo?.created_at)],
+      ["Status", memo?.status ?? "Draft"],
+    ],
+    8.15,
+    1.3,
+    4.25,
+    3.3,
+  );
+  addBulletList(
+    slide,
+    analysis?.keyAssumptions?.slice(0, 5) ?? ["No assumptions were saved with this memo."],
+    0.92,
+    4.05,
+    6.9,
+    1.65,
+  );
+}
+
+function addDecisionImpactSlide(
+  slide: Slide,
+  context: DeckContext,
+  pageNumber: number,
+) {
+  addSlideShell(slide, "Financial Impact", context, pageNumber);
+  const impact = context.decisionMemo?.analysis?.financialImpact;
+
+  addDesignedTable(
+    slide,
+    [
+      ["Impact Area", "Decision Memo View"],
+      ["Upfront cost", impact?.upfrontCost ?? "Not specified"],
+      ["Monthly recurring impact", impact?.monthlyRecurringImpact ?? "Not specified"],
+      ["Cash balance impact", impact?.cashBalanceImpact ?? "Not specified"],
+      ["Runway impact", impact?.runwayImpact ?? "Not specified"],
+      ["EBITDA / OpEx impact", impact?.ebitdaOperatingExpenseImpact ?? "Not specified"],
+      ["Forecast impact", impact?.forecastImpact ?? "Not specified"],
+      ["Payback / ROI", impact?.paybackRoi ?? "Not specified"],
+    ],
+    0.68,
+    1.28,
+    11.95,
+    4.95,
+    7.8,
+  );
+}
+
+function addDecisionScenarioSlide(
+  slide: Slide,
+  context: DeckContext,
+  pageNumber: number,
+) {
+  addSlideShell(slide, "Scenario View", context, pageNumber);
+  const scenarios = context.decisionMemo?.analysis?.scenarios ?? [];
+
+  addDesignedTable(
+    slide,
+    [
+      ["Scenario", "Summary", "Cash Impact", "Runway Impact", "Conditions"],
+      ...scenarios.map((scenario) => [
+        scenario.name,
+        scenario.summary,
+        scenario.cashImpact,
+        scenario.runwayImpact,
+        scenario.conditions,
+      ]),
+    ],
+    0.68,
+    1.28,
+    11.95,
+    4.95,
+    7.2,
+  );
+}
+
+function addDecisionRisksSlide(
+  slide: Slide,
+  context: DeckContext,
+  pageNumber: number,
+) {
+  addSlideShell(slide, "Risks & Next Steps", context, pageNumber);
+  const analysis = context.decisionMemo?.analysis;
+
+  addMiniTable(
+    slide,
+    "Key Risks",
+    [
+      ["Risk", "Mitigation"],
+      ...(analysis?.risks ?? []).slice(0, 4).map((risk) => [
+        `${risk.severity} ${risk.category}: ${risk.description}`,
+        risk.mitigation,
+      ]),
+    ],
+    0.72,
+    1.25,
+    6.3,
+    4.05,
+  );
+  addBulletList(
+    slide,
+    analysis?.recommendedNextSteps?.slice(0, 6) ?? ["No next steps were saved with this memo."],
+    7.45,
+    1.42,
+    4.75,
+    3.95,
+  );
+}
+
+function addDecisionAppendixSlide(
+  slide: Slide,
+  context: DeckContext,
+  pageNumber: number,
+) {
+  addSlideShell(slide, "Decision Memo Appendix", context, pageNumber);
+  const analysis = context.decisionMemo?.analysis;
+
+  addMiniTable(
+    slide,
+    "Source Metadata",
+    [
+      ["Field", "Source"],
+      ["Company", context.companyName],
+      ["Forecast version", context.forecastVersionName],
+      ["Monthly close", context.closeStatus],
+      ["Actuals", String(context.dataSource.actuals ?? "Unknown")],
+      ["Cash", String(context.dataSource.cash ?? "Unknown")],
+      ["Decision created", formatDeckDate(context.decisionMemo?.created_at)],
+    ],
+    0.82,
+    1.25,
+    5.6,
+    4.2,
+  );
+  addBulletList(
+    slide,
+    [
+      ...(analysis?.dataWarnings ?? []),
+      ...(analysis?.unresolvedQuestions ?? []).slice(0, 4),
+    ].slice(0, 7),
+    7.0,
+    1.38,
+    5.0,
+    4.2,
+  );
 }
 
 function addFinancialHighlightsSlide(
@@ -1415,6 +1607,22 @@ function shorten(value: string, maxLength: number) {
   }
 
   return `${trimmed.slice(0, Math.max(0, maxLength - 1)).trim()}...`;
+}
+
+function formatDeckDate(value: string | null | undefined) {
+  if (!value) {
+    return "Not saved";
+  }
+
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
 }
 
 function getFallbackCompanyName() {
