@@ -6,8 +6,13 @@ import {
   analyzeSmartUpload,
   categoryTitle,
   confirmSmartUpload,
+  missingSmartUploadRequirements,
+  smartUploadStandardFields,
   smartUploadSummary,
+  updateSmartUploadColumnMapping,
+  updateSmartUploadMappingSuggestion,
   type SmartUploadDetectedCategory,
+  type SmartUploadStandardField,
   type SmartUploadReview,
 } from "@/lib/smartUpload";
 import {
@@ -31,8 +36,6 @@ export function SmartUploadAssistant({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [review, setReview] = useState<SmartUploadReview | null>(null);
-  const [selectedCategory, setSelectedCategory] =
-    useState<SmartUploadDetectedCategory>("unknown");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isStaging, setIsStaging] = useState(false);
 
@@ -44,7 +47,6 @@ export function SmartUploadAssistant({
     try {
       const nextReview = await analyzeSmartUpload(fileToAnalyze);
       setReview(nextReview);
-      setSelectedCategory(nextReview.detectedCategory);
       onNotify?.(
         nextReview.confidence === "High" ? "success" : "warning",
         "Smart Upload analyzed the file.",
@@ -64,8 +66,19 @@ export function SmartUploadAssistant({
   }
 
   async function handleConfirm() {
-    if (!file || !review || selectedCategory === "unknown") {
+    if (!file || !review || review.detectedCategory === "unknown") {
       onNotify?.("info", "Choose a file type before staging.");
+      return;
+    }
+
+    const missing = missingSmartUploadRequirements(review);
+
+    if (missing.length > 0) {
+      onNotify?.(
+        "warning",
+        "Confirm required mappings first.",
+        `Missing: ${missing.join(", ")}.`,
+      );
       return;
     }
 
@@ -75,12 +88,12 @@ export function SmartUploadAssistant({
       await confirmSmartUpload({
         file,
         reportingMonth,
-        category: selectedCategory,
+        review,
       });
       onNotify?.(
         "success",
         "Smart Upload staged.",
-        `${file.name} was staged as ${categoryTitle(selectedCategory)} for ${formatReportingMonth(reportingMonth)}.`,
+        `${file.name} was staged as ${categoryTitle(review.detectedCategory)} for ${formatReportingMonth(reportingMonth)}.`,
       );
       setFile(null);
       setReview(null);
@@ -133,10 +146,15 @@ export function SmartUploadAssistant({
 
       {review ? (
         <div className="mt-4 rounded-2xl border border-[color:var(--line-soft)] bg-[color:var(--surface-soft)] p-4">
+          {(() => {
+            const missing = missingSmartUploadRequirements(review);
+
+            return (
+              <>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
-                Import Assistant Review
+                Confirm Upload Mapping
               </p>
               <h3 className="mt-2 text-lg font-semibold text-[color:var(--text-strong)]">
                 {review.fileName}
@@ -145,15 +163,22 @@ export function SmartUploadAssistant({
                 {smartUploadSummary(review, reportingMonth).map((line) => (
                   <p key={line}>{line}</p>
                 ))}
-                <p>{review.aiUsed ? "AI assisted classification." : "Rule-based classification."}</p>
+                <p>{review.aiUsed ? "AI assisted this mapping. Please confirm before staging." : "Rule-based mapping. Please confirm before staging."}</p>
               </div>
             </div>
             <label className="min-w-64 text-sm font-medium text-[color:var(--text-soft)]">
               Change File Type
               <select
-                value={selectedCategory}
+                value={review.detectedCategory}
                 onChange={(event) =>
-                  setSelectedCategory(event.target.value as SmartUploadDetectedCategory)
+                  setReview((current) =>
+                    current
+                      ? {
+                          ...current,
+                          detectedCategory: event.target.value as SmartUploadDetectedCategory,
+                        }
+                      : current,
+                  )
                 }
                 className="mt-2 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm"
               >
@@ -167,18 +192,52 @@ export function SmartUploadAssistant({
             </label>
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div>
-              <p className="text-sm font-semibold">Suggested Mapping</p>
-              <div className="mt-2 grid gap-2 text-sm text-[color:var(--text-soft)]">
-                {Object.entries(review.suggestedColumnMapping).map(([target, source]) => (
-                  <p key={target}>
-                    {labelForMappingTarget(target)} {" -> "} {source || "Not detected"}
-                  </p>
-                ))}
+          <div className="mt-4 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+            <section className="rounded-2xl border border-[color:var(--line-soft)] p-4">
+              <p className="text-sm font-semibold text-[color:var(--text-strong)]">Column Mapping</p>
+              <p className="mt-1 text-xs leading-5 text-[color:var(--text-muted)]">
+                Map each source column to the standard field the app should use.
+              </p>
+              <div className="mt-3 max-h-72 overflow-auto">
+                <table className="w-full min-w-[520px] text-left text-sm">
+                  <thead className="text-xs uppercase tracking-[0.12em] text-[color:var(--text-muted)]">
+                    <tr>
+                      <th className="py-2 pr-3 font-medium">Source column</th>
+                      <th className="py-2 font-medium">Standard field</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {review.headers.map((header) => (
+                      <tr key={header} className="border-t border-[color:var(--line-soft)]">
+                        <td className="py-2 pr-3 text-[color:var(--text-soft)]">{header}</td>
+                        <td className="py-2">
+                          <select
+                            value={review.columnMapping[header] ?? "Ignore"}
+                            onChange={(event) =>
+                              setReview((current) =>
+                                current
+                                  ? updateSmartUploadColumnMapping(
+                                      current,
+                                      header,
+                                      event.target.value as SmartUploadStandardField,
+                                    )
+                                  : current,
+                              )
+                            }
+                            className="h-9 w-full rounded-lg border px-2 text-sm"
+                          >
+                            {smartUploadStandardFields.map((field) => (
+                              <option key={field} value={field}>{field}</option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
-            <div>
+            </section>
+            <section className="rounded-2xl border border-[color:var(--line-soft)] p-4">
               <p className="text-sm font-semibold">Warnings</p>
               {review.warnings.length > 0 ? (
                 <ul className="mt-2 space-y-1 text-sm text-[color:var(--text-soft)]">
@@ -193,24 +252,183 @@ export function SmartUploadAssistant({
                   No major warnings detected.
                 </p>
               )}
-            </div>
+              {missing.length > 0 ? (
+                <div className="premium-warning mt-4 rounded-2xl border px-3 py-2 text-sm">
+                  Required before staging: {missing.join(", ")}.
+                </div>
+              ) : (
+                <div className="premium-success mt-4 rounded-2xl border px-3 py-2 text-sm">
+                  Required mappings are complete. This will stage data for review, not approval.
+                </div>
+              )}
+            </section>
           </div>
 
+          <section className="mt-4 rounded-2xl border border-[color:var(--line-soft)] p-4">
+            <p className="text-sm font-semibold text-[color:var(--text-strong)]">
+              Suggested Company Mapping
+            </p>
+            <p className="mt-1 text-xs leading-5 text-[color:var(--text-muted)]">
+              AI suggested these account and department mappings. Confirmed
+              mappings are saved into Company Mapping; Needs Review items remain
+              staged and visible in Unmapped Imports.
+            </p>
+            <div className="mt-3 max-h-80 overflow-auto">
+              <table className="w-full min-w-[980px] text-left text-sm">
+                <thead className="text-xs uppercase tracking-[0.12em] text-[color:var(--text-muted)]">
+                  <tr>
+                    <th className="py-2 pr-3 font-medium">Raw value</th>
+                    <th className="py-2 pr-3 font-medium">Code</th>
+                    <th className="py-2 pr-3 font-medium">Account</th>
+                    <th className="py-2 pr-3 font-medium">Department</th>
+                    <th className="py-2 pr-3 font-medium">FP&A category</th>
+                    <th className="py-2 pr-3 font-medium">Confidence</th>
+                    <th className="py-2 font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {review.suggestedMappings.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-[color:var(--text-muted)]">
+                        No account mappings detected in this file.
+                      </td>
+                    </tr>
+                  ) : (
+                    review.suggestedMappings.map((suggestion) => (
+                      <tr key={suggestion.id} className="border-t border-[color:var(--line-soft)]">
+                        <td className="py-2 pr-3 text-[color:var(--text-soft)]">{suggestion.rawValue}</td>
+                        <td className="py-2 pr-3">
+                          <input
+                            value={suggestion.accountCode}
+                            onChange={(event) =>
+                              setReview((current) =>
+                                current
+                                  ? updateSmartUploadMappingSuggestion(current, suggestion.id, { accountCode: event.target.value })
+                                  : current,
+                              )
+                            }
+                            className="h-9 w-24 rounded-lg border px-2 text-sm"
+                          />
+                        </td>
+                        <td className="py-2 pr-3">
+                          <input
+                            value={suggestion.accountName}
+                            onChange={(event) =>
+                              setReview((current) =>
+                                current
+                                  ? updateSmartUploadMappingSuggestion(current, suggestion.id, { accountName: event.target.value })
+                                  : current,
+                              )
+                            }
+                            className="h-9 w-44 rounded-lg border px-2 text-sm"
+                          />
+                        </td>
+                        <td className="py-2 pr-3">
+                          <input
+                            value={suggestion.departmentName}
+                            onChange={(event) =>
+                              setReview((current) =>
+                                current
+                                  ? updateSmartUploadMappingSuggestion(current, suggestion.id, { departmentName: event.target.value })
+                                  : current,
+                              )
+                            }
+                            className="h-9 w-44 rounded-lg border px-2 text-sm"
+                          />
+                        </td>
+                        <td className="py-2 pr-3">
+                          <input
+                            value={suggestion.normalizedCategory}
+                            onChange={(event) =>
+                              setReview((current) =>
+                                current
+                                  ? updateSmartUploadMappingSuggestion(current, suggestion.id, { normalizedCategory: event.target.value })
+                                  : current,
+                              )
+                            }
+                            className="h-9 w-52 rounded-lg border px-2 text-sm"
+                          />
+                        </td>
+                        <td className="py-2 pr-3 text-[color:var(--text-soft)]">{suggestion.confidence}</td>
+                        <td className="py-2">
+                          <select
+                            value={suggestion.action}
+                            onChange={(event) =>
+                              setReview((current) =>
+                                current
+                                  ? updateSmartUploadMappingSuggestion(
+                                      current,
+                                      suggestion.id,
+                                      { action: event.target.value as typeof suggestion.action },
+                                    )
+                                  : current,
+                              )
+                            }
+                            className="h-9 rounded-lg border px-2 text-sm"
+                          >
+                            <option value="Confirm">Confirm</option>
+                            <option value="Needs Review">Needs Review</option>
+                            <option value="Ignore">Ignore</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="mt-4 rounded-2xl border border-[color:var(--line-soft)] p-4">
+            <p className="text-sm font-semibold text-[color:var(--text-strong)]">
+              Transformed Preview
+            </p>
+            <div className="mt-3 overflow-auto">
+              <table className="w-full min-w-[900px] text-left text-sm">
+                <thead className="text-xs uppercase tracking-[0.12em] text-[color:var(--text-muted)]">
+                  <tr>
+                    <th className="py-2 pr-3 font-medium">Period</th>
+                    <th className="py-2 pr-3 font-medium">Code</th>
+                    <th className="py-2 pr-3 font-medium">Account</th>
+                    <th className="py-2 pr-3 font-medium">Department</th>
+                    <th className="py-2 pr-3 font-medium">Category</th>
+                    <th className="py-2 pr-3 text-right font-medium">Amount</th>
+                    <th className="py-2 font-medium">Mapping</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {review.transformedRows.slice(0, 15).map((row) => (
+                    <tr key={`${row.sourceRowNumber}-${row.accountName}-${row.period}`} className="border-t border-[color:var(--line-soft)]">
+                      <td className="py-2 pr-3 text-[color:var(--text-soft)]">{row.period || "Missing"}</td>
+                      <td className="py-2 pr-3 text-[color:var(--text-soft)]">{row.accountCode || "-"}</td>
+                      <td className="py-2 pr-3 text-[color:var(--text-soft)]">{row.accountName || "-"}</td>
+                      <td className="py-2 pr-3 text-[color:var(--text-soft)]">{row.department || "-"}</td>
+                      <td className="py-2 pr-3 text-[color:var(--text-soft)]">{row.category || "-"}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums text-[color:var(--text-soft)]">{formatAmount(row.amount)}</td>
+                      <td className="py-2 text-[color:var(--text-soft)]">{row.mappingStatus}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           <p className="mt-4 text-sm leading-6 text-[color:var(--text-muted)]">
-            {review.reasoning}
+            {review.reasoning} This upload will not affect reports until it is
+            reviewed and approved in Data Room.
           </p>
 
           <div className="mt-5 flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={isStaging || selectedCategory === "unknown"}
+              disabled={isStaging || missing.length > 0}
               onClick={() => void handleConfirm()}
               className="h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isStaging ? "Staging..." : "Confirm and Stage"}
+              {isStaging ? "Staging..." : "Confirm Mapping and Stage"}
             </button>
             <Link
-              href={`/data-entry?month=${reportingMonth}&category=${selectedCategory === "unknown" ? "actuals" : selectedCategory}`}
+              href={`/data-entry?month=${reportingMonth}&category=${review.detectedCategory === "unknown" ? "actuals" : review.detectedCategory}`}
               className="flex h-10 items-center rounded-md border border-neutral-300 px-4 text-sm font-medium"
             >
               Send to Data Entry
@@ -226,21 +444,20 @@ export function SmartUploadAssistant({
               Cancel Upload
             </button>
           </div>
+              </>
+            );
+          })()}
         </div>
       ) : null}
     </section>
   );
 }
 
-function labelForMappingTarget(target: string) {
-  const labels: Record<string, string> = {
-    period: "Date column",
-    account: "Account column",
-    amount: "Amount column",
-    department: "Department column",
-    category: "Category column",
-    notes: "Notes column",
-  };
-
-  return labels[target] ?? target;
+function formatAmount(value: number | null) {
+  if (value === null) return "-";
+  return value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
 }

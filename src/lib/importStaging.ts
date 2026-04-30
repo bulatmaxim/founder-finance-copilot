@@ -61,20 +61,24 @@ type RawCsvRow = Record<string, unknown>;
 
 type FieldMap = {
   period?: string;
+  accountCode?: string;
   account?: string;
   category?: string;
   amount?: string;
   debit?: string;
   credit?: string;
+  departmentCode?: string;
   department?: string;
 };
 
 type FlexibleRow = {
   sourceRowNumber: number;
   period: string | null;
+  accountCode: string | null;
   rawAccountName: string;
   rawCategory: string | null;
   mappedCategory: string | null;
+  departmentCode: string | null;
   department: string | null;
   amount: number | null;
   rawData: RawCsvRow;
@@ -111,6 +115,7 @@ const accountAliases = [
   "category",
   "expense category",
 ];
+const accountCodeAliases = ["gl code", "account code", "account no", "account number"];
 const categoryAliases = ["raw category", "category", "type", "classification"];
 const amountAliases = [
   "amount",
@@ -122,6 +127,7 @@ const amountAliases = [
 ];
 const debitAliases = ["debit", "debits"];
 const creditAliases = ["credit", "credits"];
+const departmentCodeAliases = ["dept code", "department code", "cost center code"];
 const departmentAliases = ["department", "dept", "function", "team", "cost center"];
 
 export async function createImportBatchForUpload({
@@ -183,9 +189,11 @@ export async function createImportBatchForUpload({
     file_category: fileCategory,
     source_row_number: row.sourceRowNumber,
     period: row.period,
+    account_code: row.accountCode,
     raw_account_name: row.rawAccountName || null,
     raw_category: row.rawCategory,
     mapped_category: row.mappedCategory,
+    department_code: row.departmentCode,
     department: row.department,
     amount: row.amount,
     raw_data: row.rawData,
@@ -451,11 +459,13 @@ function parseFlexibleImport({
 function detectFieldMap(fields: string[]): FieldMap {
   return {
     period: findField(fields, periodAliases),
+    accountCode: findField(fields, accountCodeAliases),
     account: findField(fields, accountAliases),
     category: findField(fields, categoryAliases),
     amount: findField(fields, amountAliases),
     debit: findField(fields, debitAliases),
     credit: findField(fields, creditAliases),
+    departmentCode: findField(fields, departmentCodeAliases),
     department: findField(fields, departmentAliases),
   };
 }
@@ -482,6 +492,7 @@ function normalizeFlexibleRow({
   duplicateKeys: Set<string>;
 }): FlexibleRow {
   const period = normalizePeriod(readField(rawRow, fieldMap.period));
+  const accountCode = readField(rawRow, fieldMap.accountCode) || null;
   const rawAccountName = readField(rawRow, fieldMap.account);
   const rawCategory = readField(rawRow, fieldMap.category) || null;
   const amount = parseFlexibleAmount({
@@ -489,14 +500,16 @@ function normalizeFlexibleRow({
     debitValue: readField(rawRow, fieldMap.debit),
     creditValue: readField(rawRow, fieldMap.credit),
   });
+  const departmentCode = readField(rawRow, fieldMap.departmentCode) || null;
   const department = readField(rawRow, fieldMap.department) || null;
-  const mappingKey = normalizeAccountName(rawAccountName);
-  const savedMapping = rawAccountName ? mappingLookup.get(mappingKey) : "";
-  const suggestion = rawAccountName ? suggestAccountMapping(rawAccountName) : null;
+  const mappingName = rawAccountName || accountCode || "";
+  const mappingKey = normalizeAccountName(mappingName);
+  const savedMapping = mappingName ? mappingLookup.get(mappingKey) : "";
+  const suggestion = mappingName ? suggestAccountMapping(mappingName) : null;
   const mappedCategory = savedMapping || suggestion?.category || null;
   const mappingStatus: StagedRowMappingStatus = savedMapping
     ? "Mapped"
-    : rawAccountName
+    : mappingName
       ? suggestion?.category === "Uncategorized"
         ? "Unmapped"
         : "Suggested"
@@ -504,7 +517,7 @@ function normalizeFlexibleRow({
   const messages: string[] = [];
 
   if (!period) messages.push("Missing period/date");
-  if (!rawAccountName && isFinancialCategory(fileCategory)) {
+  if (!mappingName && isFinancialCategory(fileCategory)) {
     messages.push("Missing account");
   }
   if (amount === null) messages.push("Missing amount");
@@ -518,7 +531,7 @@ function normalizeFlexibleRow({
   ) {
     messages.push("Negative revenue");
   }
-  if (mappingStatus !== "Mapped" && rawAccountName && isFinancialCategory(fileCategory)) {
+  if (mappingStatus !== "Mapped" && mappingName && isFinancialCategory(fileCategory)) {
     messages.push("Unmapped account");
   }
 
@@ -533,9 +546,11 @@ function normalizeFlexibleRow({
   return {
     sourceRowNumber: rowNumber,
     period,
+    accountCode,
     rawAccountName,
     rawCategory,
     mappedCategory,
+    departmentCode,
     department,
     amount,
     rawData: rawRow,

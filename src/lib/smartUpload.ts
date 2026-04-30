@@ -4,20 +4,79 @@ import Papa from "papaparse";
 import {
   formatReportingMonth,
   monthlyCloseCategories,
-  uploadMonthlyCloseFile,
+  reportingMonthKey,
   type MonthlyCloseCategory,
+  type MonthlyCloseStatus,
 } from "@/lib/monthlyClose";
+import {
+  normalizeAccountName,
+  saveAccountMapping,
+  suggestAccountMapping,
+} from "@/lib/accountMapping";
+import { createClient } from "@/lib/supabase/client";
+import { getCurrentCompany } from "@/lib/supabase/data";
+import type {
+  CompanyAccount,
+  CompanyDepartment,
+  MappingRule,
+} from "@/lib/companyMapping";
+import type { ValidationSummary } from "@/lib/validations";
 
 export type SmartUploadConfidence = "High" | "Medium" | "Low";
 export type SmartUploadDetectedCategory = MonthlyCloseCategory | "unknown";
+export type SmartUploadStandardField =
+  | "Period"
+  | "Account Code"
+  | "Account Name"
+  | "Raw Category"
+  | "Department Code"
+  | "Department"
+  | "Amount"
+  | "Notes"
+  | "Customer / Segment"
+  | "Revenue Type"
+  | "Revenue Amount"
+  | "Employee / Role"
+  | "Salary"
+  | "KPI Name"
+  | "KPI Value"
+  | "Ignore";
 
-export type SmartColumnMapping = {
-  period?: string;
-  account?: string;
-  amount?: string;
-  department?: string;
-  category?: string;
-  notes?: string;
+export type SmartColumnMapping = Record<string, SmartUploadStandardField>;
+
+export type SmartUploadMappingAction =
+  | "Confirm"
+  | "Ignore"
+  | "Needs Review";
+
+export type SmartUploadMappingSuggestion = {
+  id: string;
+  rawValue: string;
+  accountCode: string;
+  accountName: string;
+  departmentCode: string;
+  departmentName: string;
+  normalizedCategory: string;
+  statementType: string;
+  confidence: SmartUploadConfidence;
+  reason: string;
+  action: SmartUploadMappingAction;
+  matchedExisting: boolean;
+};
+
+export type SmartUploadTransformedRow = {
+  sourceRowNumber: number;
+  period: string | null;
+  accountCode: string;
+  accountName: string;
+  rawCategory: string;
+  departmentCode: string;
+  department: string;
+  category: string;
+  amount: number | null;
+  notes: string;
+  mappingStatus: "Mapped" | "Suggested" | "Unmapped" | "Ignored";
+  rawData: Record<string, unknown>;
 };
 
 export type SmartUploadReview = {
@@ -26,16 +85,54 @@ export type SmartUploadReview = {
   confidence: SmartUploadConfidence;
   detectedPeriodStart: string | null;
   detectedPeriodEnd: string | null;
-  suggestedColumnMapping: SmartColumnMapping;
+  columnMapping: SmartColumnMapping;
+  suggestedMappings: SmartUploadMappingSuggestion[];
+  transformedRows: SmartUploadTransformedRow[];
   warnings: string[];
   reasoning: string;
   headers: string[];
   sampleRows: Record<string, unknown>[];
+  rowCount: number;
   aiUsed: boolean;
 };
 
+type CompanyMappingContext = {
+  departments: CompanyDepartment[];
+  accounts: CompanyAccount[];
+  rules: MappingRule[];
+};
+
+type SmartUploadAiMapping = {
+  detected_category?: string;
+  confidence?: SmartUploadConfidence;
+  period_range?: { start?: string | null; end?: string | null };
+  column_mapping?: Record<string, string>;
+  suggested_accounts?: Array<Record<string, unknown>>;
+  warnings?: string[];
+  reasoning?: string;
+};
+
+const standardFields: SmartUploadStandardField[] = [
+  "Period",
+  "Account Code",
+  "Account Name",
+  "Raw Category",
+  "Department Code",
+  "Department",
+  "Amount",
+  "Notes",
+  "Customer / Segment",
+  "Revenue Type",
+  "Revenue Amount",
+  "Employee / Role",
+  "Salary",
+  "KPI Name",
+  "KPI Value",
+  "Ignore",
+];
+
 const headerSignals: Record<Exclude<SmartUploadDetectedCategory, "unknown">, string[]> = {
-  actuals: ["account", "account name", "actual", "amount", "debit", "credit", "month", "period"],
+  actuals: ["account", "account name", "gl", "actual", "amount", "debit", "credit", "month", "period"],
   budget: ["budget", "plan", "forecast baseline", "budget amount"],
   cash: ["beginning cash", "ending cash", "cash in", "cash out", "burn", "runway"],
   revenue: ["customer", "revenue", "mrr", "arr", "product", "segment", "new", "existing"],
@@ -44,12 +141,26 @@ const headerSignals: Record<Exclude<SmartUploadDetectedCategory, "unknown">, str
   notes: ["note", "assumption", "topic", "owner", "priority"],
 };
 
-const periodAliases = ["month", "date", "period", "accounting period", "reporting month", "fiscal month"];
-const accountAliases = ["account", "account name", "gl account", "line item", "category", "expense category"];
-const amountAliases = ["amount", "actual", "value", "total", "budget amount", "revenue amount", "debit", "credit"];
-const departmentAliases = ["department", "dept", "function", "team", "cost center"];
-const categoryAliases = ["category", "type", "classification", "revenue type"];
-const noteAliases = ["note", "notes", "assumption", "comment", "description"];
+const fieldAliases: Record<SmartUploadStandardField, string[]> = {
+  Period: ["month", "date", "period", "accounting period", "reporting month", "fiscal month"],
+  "Account Code": ["gl code", "account code", "account no", "account number", "code"],
+  "Account Name": ["account", "account name", "description", "line item", "name"],
+  "Raw Category": ["category", "type", "classification", "expense category"],
+  "Department Code": ["dept code", "department code", "cost center code", "function code"],
+  Department: ["department", "dept", "function", "team", "cost center"],
+  Amount: ["amount", "actual", "value", "total", "debit", "credit"],
+  Notes: ["note", "notes", "assumption", "comment", "memo"],
+  "Customer / Segment": ["customer", "segment", "account"],
+  "Revenue Type": ["revenue type", "product", "stream"],
+  "Revenue Amount": ["revenue amount", "revenue", "mrr", "arr"],
+  "Employee / Role": ["employee", "role", "employee name"],
+  Salary: ["salary", "compensation", "base pay"],
+  "KPI Name": ["kpi", "metric", "metric name"],
+  "KPI Value": ["kpi value", "metric value", "value"],
+  Ignore: [],
+};
+
+export const smartUploadStandardFields = standardFields;
 
 export async function analyzeSmartUpload(file: File): Promise<SmartUploadReview> {
   const csvText = await file.text();
@@ -59,84 +170,368 @@ export async function analyzeSmartUpload(file: File): Promise<SmartUploadReview>
     transformHeader: (header) => header.trim(),
   });
   const headers = parsed.meta.fields ?? [];
-  const sampleRows = parsed.data.slice(0, 8);
-  const ruleReview = buildRuleBasedReview({
+  const rows = parsed.data.filter((row) =>
+    Object.values(row).some((value) => String(value ?? "").trim()),
+  );
+  const companyMapping = await loadCompanyMappingContext();
+  const ruleReview = buildReview({
     fileName: file.name,
     headers,
-    rows: parsed.data,
+    rows,
+    companyMapping,
   });
 
   try {
-    const response = await fetch("/api/ai/smart-upload-classify", {
+    const response = await fetch("/api/ai/smart-upload-map", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
         file_name: file.name,
         headers,
-        sample_rows: sampleRows,
-        rule_based_result: ruleReview,
+        sample_rows: rows.slice(0, 8),
+        existing_company_departments: companyMapping.departments.map((department) => ({
+          name: department.name,
+          code: department.code,
+          function: department.function,
+        })),
+        existing_company_accounts: companyMapping.accounts.map((account) => ({
+          account_name: account.account_name,
+          account_code: account.account_code,
+          uploaded_alias: account.uploaded_alias,
+          normalized_category: account.normalized_category,
+        })),
+        mapping_rules: companyMapping.rules.map((rule) => ({
+          rule_type: rule.rule_type,
+          match_value: rule.match_value,
+          normalized_category: rule.normalized_category,
+        })),
+        rule_based_result: serializeReviewForAi(ruleReview),
       }),
     });
     const body = (await response.json()) as {
-      classification?: {
-        detected_category?: SmartUploadDetectedCategory;
+      mapping?: {
+        detected_category?: string;
         confidence?: SmartUploadConfidence;
-        detected_period_start?: string | null;
-        detected_period_end?: string | null;
-        suggested_column_mapping?: SmartColumnMapping;
+        period_range?: { start?: string | null; end?: string | null };
+        column_mapping?: Record<string, string>;
+        suggested_accounts?: Array<Partial<SmartUploadMappingSuggestion> & {
+          raw_value?: string;
+          account_code?: string;
+          account_name?: string;
+          department_code?: string;
+          department_name?: string;
+          normalized_category?: string;
+          statement_type?: string;
+        }>;
         warnings?: string[];
         reasoning?: string;
       };
     };
 
-    if (!response.ok || !body.classification) {
+    if (!response.ok || !body.mapping) {
       return ruleReview;
     }
 
-    return {
-      ...ruleReview,
-      detectedCategory: normalizeDetectedCategory(
-        body.classification.detected_category ?? ruleReview.detectedCategory,
-      ),
-      confidence: body.classification.confidence ?? ruleReview.confidence,
-      detectedPeriodStart:
-        body.classification.detected_period_start ?? ruleReview.detectedPeriodStart,
-      detectedPeriodEnd:
-        body.classification.detected_period_end ?? ruleReview.detectedPeriodEnd,
-      suggestedColumnMapping: {
-        ...ruleReview.suggestedColumnMapping,
-        ...(body.classification.suggested_column_mapping ?? {}),
-      },
-      warnings: [
-        ...new Set([
-          ...ruleReview.warnings,
-          ...(body.classification.warnings ?? []),
-        ]),
-      ],
-      reasoning: body.classification.reasoning ?? ruleReview.reasoning,
-      aiUsed: true,
-    };
+    return applyAiMapping(ruleReview, body.mapping, rows, companyMapping);
   } catch (error) {
-    console.warn("Smart Upload AI classification fell back to rules", error);
+    console.warn("Smart Upload AI mapping fell back to rules", error);
     return ruleReview;
   }
+}
+
+export function updateSmartUploadColumnMapping(
+  review: SmartUploadReview,
+  sourceColumn: string,
+  standardField: SmartUploadStandardField,
+) {
+  const nextReview = {
+    ...review,
+    columnMapping: {
+      ...review.columnMapping,
+      [sourceColumn]: standardField,
+    },
+  };
+
+  return recomputeReview(nextReview);
+}
+
+export function updateSmartUploadMappingSuggestion(
+  review: SmartUploadReview,
+  suggestionId: string,
+  patch: Partial<SmartUploadMappingSuggestion>,
+) {
+  const nextReview = {
+    ...review,
+    suggestedMappings: review.suggestedMappings.map((suggestion) =>
+      suggestion.id === suggestionId ? { ...suggestion, ...patch } : suggestion,
+    ),
+  };
+
+  return recomputeReview(nextReview);
+}
+
+export function requiredSmartUploadFields(category: SmartUploadDetectedCategory) {
+  if (category === "actuals" || category === "budget") {
+    return ["Period", "Amount", "Account Name or Account Code"];
+  }
+
+  if (category === "cash") {
+    return ["Period", "Amount"];
+  }
+
+  return ["Period"];
+}
+
+export function missingSmartUploadRequirements(review: SmartUploadReview) {
+  const mappedFields = new Set(Object.values(review.columnMapping));
+  const missing: string[] = [];
+
+  if (review.detectedCategory === "unknown") {
+    missing.push("File type");
+  }
+
+  if (!mappedFields.has("Period")) {
+    missing.push("Period");
+  }
+
+  if (
+    (review.detectedCategory === "actuals" || review.detectedCategory === "budget") &&
+    !mappedFields.has("Account Name") &&
+    !mappedFields.has("Account Code")
+  ) {
+    missing.push("Account Name or Account Code");
+  }
+
+  if (
+    review.detectedCategory !== "notes" &&
+    !mappedFields.has("Amount") &&
+    !mappedFields.has("Revenue Amount") &&
+    !mappedFields.has("Salary") &&
+    !mappedFields.has("KPI Value")
+  ) {
+    missing.push("Amount");
+  }
+
+  return missing;
 }
 
 export async function confirmSmartUpload({
   file,
   reportingMonth,
-  category,
+  review,
 }: {
   file: File;
   reportingMonth: string;
-  category: MonthlyCloseCategory;
+  review: SmartUploadReview;
 }) {
-  return uploadMonthlyCloseFile({
-    file,
-    reportingMonth,
-    fileCategory: category,
+  if (review.detectedCategory === "unknown") {
+    throw new Error("Choose a file type before staging.");
+  }
+
+  const missing = missingSmartUploadRequirements(review);
+
+  if (missing.length > 0) {
+    throw new Error(`Complete required mapping first: ${missing.join(", ")}.`);
+  }
+
+  const { user, company } = await getCurrentCompany();
+
+  if (!user) {
+    throw new Error("Log in before staging uploads.");
+  }
+
+  if (!company) {
+    throw new Error("Please complete your company profile before staging uploads.");
+  }
+
+  const supabase = createClient();
+  const categoryConfig = monthlyCloseCategories.find(
+    (category) => category.id === review.detectedCategory,
+  );
+
+  if (!categoryConfig) {
+    throw new Error("Unknown Smart Upload category.");
+  }
+
+  await saveConfirmedCompanyMappings(review);
+
+  const stagedRows = review.transformedRows.filter(
+    (row) => row.mappingStatus !== "Ignored",
+  );
+  const validationSummary = buildValidationSummary(review, stagedRows);
+  const status = statusFromReview(review, validationSummary);
+  const storagePath = `${user.id}/${company.id}/smart-upload/${reportingMonth}/${review.detectedCategory}/${Date.now()}-${sanitizeFileName(file.name)}`;
+
+  const { error: storageError } = await supabase.storage
+    .from("finance-uploads")
+    .upload(storagePath, file, {
+      contentType: file.type || "text/csv",
+      upsert: false,
+    });
+
+  if (storageError) {
+    throw new Error(`Storage upload failed: ${storageError.message}`);
+  }
+
+  await supabase
+    .from("uploaded_files")
+    .update({ is_active: false })
+    .eq("company_id", company.id)
+    .eq("reporting_month", reportingMonth)
+    .eq("file_category", review.detectedCategory)
+    .eq("is_active", true);
+
+  const { data: uploadedFile, error: fileError } = await supabase
+    .from("uploaded_files")
+    .insert({
+      company_id: company.id,
+      user_id: user.id,
+      data_type: categoryConfig.dataType,
+      file_category: review.detectedCategory,
+      file_name: file.name,
+      storage_path: storagePath,
+      reporting_month: reportingMonth,
+      period_start: review.detectedPeriodStart?.slice(0, 7) ?? reportingMonthKey(reportingMonth),
+      period_end: review.detectedPeriodEnd?.slice(0, 7) ?? reportingMonthKey(reportingMonth),
+      status:
+        status === "Needs Mapping"
+          ? "needs_mapping"
+          : status === "Needs review"
+            ? "needs_review"
+            : "staged",
+      row_count: stagedRows.length,
+      error_count: validationSummary.errorRows,
+      warning_count: validationSummary.warningRows,
+      uploaded_at: new Date().toISOString(),
+      is_active: true,
+    })
+    .select("id")
+    .single();
+
+  if (fileError || !uploadedFile) {
+    throw new Error(`Upload metadata save failed: ${fileError?.message ?? "No file row returned."}`);
+  }
+
+  const mappedRowCount = stagedRows.filter((row) => row.mappingStatus === "Mapped").length;
+  const unmappedRowCount = stagedRows.filter(
+    (row) => row.mappingStatus === "Suggested" || row.mappingStatus === "Unmapped",
+  ).length;
+  const batchStatus =
+    status === "Needs Mapping"
+      ? "Needs Mapping"
+      : status === "Needs review"
+        ? "Ready for Review"
+        : "Staged";
+  const { data: batch, error: batchError } = await supabase
+    .from("import_batches")
+    .insert({
+      user_id: user.id,
+      company_id: company.id,
+      uploaded_file_id: uploadedFile.id,
+      reporting_month: reportingMonth,
+      file_category: review.detectedCategory,
+      status: batchStatus,
+      detected_period_start: review.detectedPeriodStart,
+      detected_period_end: review.detectedPeriodEnd,
+      detected_row_count: stagedRows.length,
+      mapped_row_count: mappedRowCount,
+      unmapped_row_count: unmappedRowCount,
+      validation_summary: validationSummary,
+      updated_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (batchError || !batch) {
+    throw new Error(`Import staging batch save failed: ${batchError?.message ?? "No batch returned."}`);
+  }
+
+  if (stagedRows.length > 0) {
+    const { error: rowError } = await supabase.from("import_staged_rows").insert(
+      stagedRows.map((row) => ({
+        user_id: user.id,
+        company_id: company.id,
+        import_batch_id: batch.id,
+        uploaded_file_id: uploadedFile.id,
+        file_category: review.detectedCategory,
+        source_row_number: row.sourceRowNumber,
+        period: row.period,
+        raw_account_name: row.accountName || row.accountCode || null,
+        account_code: row.accountCode || null,
+        raw_category: row.rawCategory || null,
+        mapped_category: row.category || null,
+        department: row.department || null,
+        department_code: row.departmentCode || null,
+        amount: row.amount,
+        raw_data: {
+          ...row.rawData,
+          smart_upload_column_mapping: review.columnMapping,
+          account_code: row.accountCode || null,
+          department_code: row.departmentCode || null,
+          notes: row.notes || null,
+        },
+        mapping_status: row.mappingStatus,
+        validation_status:
+          !row.period || (review.detectedCategory !== "notes" && row.amount === null)
+            ? "Critical"
+            : row.mappingStatus === "Unmapped" || row.mappingStatus === "Suggested"
+              ? "Warning"
+              : "Valid",
+        updated_at: new Date().toISOString(),
+      })),
+    );
+
+    if (rowError) {
+      throw new Error(`Import staged rows save failed: ${rowError.message}`);
+    }
+  }
+
+  const { error: itemError } = await supabase
+    .from("monthly_close_items")
+    .upsert(
+      {
+        user_id: user.id,
+        company_id: company.id,
+        reporting_month: reportingMonth,
+        file_category: review.detectedCategory,
+        status,
+        file_name: file.name,
+        storage_path: storagePath,
+        uploaded_file_id: uploadedFile.id,
+        uploaded_at: new Date().toISOString(),
+        approved_at: null,
+        approved_by: null,
+        validation_summary: validationSummary,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "company_id,reporting_month,file_category" },
+    );
+
+  if (itemError) {
+    throw new Error(`Checklist update failed: ${itemError.message}`);
+  }
+
+  await supabase.from("monthly_close_activity").insert({
+    user_id: user.id,
+    company_id: company.id,
+    reporting_month: reportingMonth,
+    file_category: review.detectedCategory,
+    action: "uploaded_file",
+    details: {
+      file_name: file.name,
+      uploaded_file_id: uploadedFile.id,
+      import_batch_id: batch.id,
+      smart_upload: true,
+      status,
+      detected_period_start: review.detectedPeriodStart,
+      detected_period_end: review.detectedPeriodEnd,
+      detected_row_count: stagedRows.length,
+      unmapped_row_count: unmappedRowCount,
+    },
   });
+
+  return { status, uploadedFileId: String(uploadedFile.id), importBatchId: String(batch.id) };
 }
 
 export function categoryTitle(category: SmartUploadDetectedCategory) {
@@ -153,77 +548,639 @@ export function smartUploadSummary(review: SmartUploadReview, reportingMonth: st
       review.detectedPeriodStart,
       review.detectedPeriodEnd,
     )}`,
+    `Rows detected: ${review.rowCount.toLocaleString()}`,
     `Selected Data Room Month: ${formatReportingMonth(reportingMonth)}`,
   ];
 }
 
-function buildRuleBasedReview({
+function buildReview({
   fileName,
   headers,
   rows,
+  companyMapping,
 }: {
   fileName: string;
   headers: string[];
   rows: Record<string, unknown>[];
+  companyMapping: CompanyMappingContext;
 }): SmartUploadReview {
-  const scores = Object.entries(headerSignals).map(([category, signals]) => ({
-    category: category as SmartUploadDetectedCategory,
-    score: scoreHeaders(headers, signals),
-    reason: `Matched ${signals.filter((signal) => headers.some((header) => normalizeHeader(header).includes(normalizeHeader(signal)))).length} header signal(s).`,
-  }));
-  const best = scores.sort((a, b) => b.score - a.score)[0] ?? {
-    category: "unknown",
-    score: 0,
-    reason: "No recognizable finance headers were found.",
-  };
-  const detectedCategory =
-    best.score >= 2 ? best.category : ("unknown" as SmartUploadDetectedCategory);
-  const confidence: SmartUploadConfidence =
-    best.score >= 5 ? "High" : best.score >= 2 ? "Medium" : "Low";
-  const mapping = detectColumnMapping(headers);
-  const periods = detectPeriods(rows, mapping.period);
+  const detectedCategory = detectCategory(headers);
+  const columnMapping = detectColumnMapping(headers, detectedCategory);
+  const transformedRows = transformRows(rows, columnMapping, companyMapping);
+  const periods = transformedRows.map((row) => row.period).filter((period): period is string => Boolean(period)).sort();
   const warnings = buildWarnings({
-    headers,
-    rows,
-    mapping,
     detectedCategory,
+    columnMapping,
+    transformedRows,
     periodCount: new Set(periods).size,
   });
 
   return {
     fileName,
-    detectedCategory,
-    confidence,
+    detectedCategory: detectedCategory.category,
+    confidence: detectedCategory.confidence,
     detectedPeriodStart: periods[0] ?? null,
     detectedPeriodEnd: periods.at(-1) ?? null,
-    suggestedColumnMapping: mapping,
+    columnMapping,
+    suggestedMappings: buildMappingSuggestions(transformedRows, companyMapping),
+    transformedRows,
     warnings,
-    reasoning:
-      detectedCategory === "unknown"
-        ? "The file did not contain enough recognizable finance headers. Stage it as Needs Review or send it to Data Entry."
-        : `Rule-based detection selected ${categoryTitle(detectedCategory)}. ${best.reason}`,
+    reasoning: detectedCategory.reasoning,
     headers,
     sampleRows: rows.slice(0, 8),
+    rowCount: rows.length,
     aiUsed: false,
   };
 }
 
-function scoreHeaders(headers: string[], signals: string[]) {
-  return signals.reduce((score, signal) => {
-    const normalizedSignal = normalizeHeader(signal);
-    return score + (headers.some((header) => normalizeHeader(header).includes(normalizedSignal)) ? 1 : 0);
-  }, 0);
+function recomputeReview(review: SmartUploadReview): SmartUploadReview {
+  const transformedRows = transformRows(review.sampleRows.length === review.rowCount ? review.sampleRows : review.transformedRows.map((row) => row.rawData), review.columnMapping, {
+    departments: [],
+    accounts: [],
+    rules: [],
+  });
+  const suggestionsByRaw = new Map(review.suggestedMappings.map((suggestion) => [suggestion.id, suggestion]));
+  const suggestedMappings = buildMappingSuggestions(transformedRows, {
+    departments: [],
+    accounts: [],
+    rules: [],
+  }).map((suggestion) => ({
+    ...suggestion,
+    ...(suggestionsByRaw.get(suggestion.id) ?? {}),
+  }));
+  const rows: SmartUploadTransformedRow[] = applySuggestionActions(transformedRows, suggestedMappings);
+  const periods = rows.map((row) => row.period).filter((period): period is string => Boolean(period)).sort();
+
+  return {
+    ...review,
+    transformedRows: rows,
+    suggestedMappings,
+    detectedPeriodStart: periods[0] ?? null,
+    detectedPeriodEnd: periods.at(-1) ?? null,
+    warnings: buildWarnings({
+      detectedCategory: { category: review.detectedCategory, confidence: review.confidence, reasoning: review.reasoning },
+      columnMapping: review.columnMapping,
+      transformedRows: rows,
+      periodCount: new Set(periods).size,
+    }),
+  };
 }
 
-function detectColumnMapping(headers: string[]): SmartColumnMapping {
+function applyAiMapping(
+  review: SmartUploadReview,
+  payload: SmartUploadAiMapping,
+  rows: Record<string, unknown>[],
+  companyMapping: CompanyMappingContext,
+) {
+  const columnMapping = normalizeAiColumnMapping(
+    payload.column_mapping ?? {},
+    review.columnMapping,
+    review.headers,
+  );
+  const category = normalizeDetectedCategory(
+    payload.detected_category ?? review.detectedCategory,
+  );
+  const transformedRows = transformRows(rows, columnMapping, companyMapping);
+  const baseSuggestions = buildMappingSuggestions(transformedRows, companyMapping);
+  const aiSuggestions = mergeAiSuggestions(baseSuggestions, payload.suggested_accounts ?? []);
+  const finalRows = applySuggestionActions(transformedRows, aiSuggestions);
+  const periods = finalRows.map((row) => row.period).filter((period): period is string => Boolean(period)).sort();
+
   return {
-    period: findHeader(headers, periodAliases),
-    account: findHeader(headers, accountAliases),
-    amount: findHeader(headers, amountAliases),
-    department: findHeader(headers, departmentAliases),
-    category: findHeader(headers, categoryAliases),
-    notes: findHeader(headers, noteAliases),
+    ...review,
+    detectedCategory: category,
+    confidence: payload.confidence ?? review.confidence,
+    detectedPeriodStart: payload.period_range?.start ?? periods[0] ?? review.detectedPeriodStart,
+    detectedPeriodEnd: payload.period_range?.end ?? periods.at(-1) ?? review.detectedPeriodEnd,
+    columnMapping,
+    suggestedMappings: aiSuggestions,
+    transformedRows: finalRows,
+    warnings: [...new Set([...review.warnings, ...(payload.warnings ?? [])])],
+    reasoning: payload.reasoning ?? review.reasoning,
+    aiUsed: true,
+  } satisfies SmartUploadReview;
+}
+
+function detectCategory(headers: string[]) {
+  const scores = Object.entries(headerSignals).map(([category, signals]) => {
+    const matches = signals.filter((signal) =>
+      headers.some((header) => normalizeHeader(header).includes(normalizeHeader(signal))),
+    );
+
+    return {
+      category: category as SmartUploadDetectedCategory,
+      score: matches.length,
+      matches,
+    };
+  });
+  const best = scores.sort((a, b) => b.score - a.score)[0];
+  const category = best && best.score >= 2 ? best.category : "unknown";
+  const confidence: SmartUploadConfidence =
+    best && best.score >= 5 ? "High" : best && best.score >= 2 ? "Medium" : "Low";
+
+  return {
+    category,
+    confidence,
+    reasoning:
+      category === "unknown"
+        ? "The file did not contain enough recognizable finance headers."
+        : `Rule-based detection matched ${best.matches.length} header signal(s).`,
   };
+}
+
+function detectColumnMapping(
+  headers: string[],
+  detected: ReturnType<typeof detectCategory>,
+): SmartColumnMapping {
+  const mapping: SmartColumnMapping = Object.fromEntries(
+    headers.map((header) => [header, "Ignore"]),
+  ) as SmartColumnMapping;
+
+  standardFields
+    .filter((field) => field !== "Ignore")
+    .forEach((field) => {
+      const header = findHeader(headers, fieldAliases[field]);
+
+      if (header && mapping[header] === "Ignore") {
+        mapping[header] = field;
+      }
+    });
+
+  if (detected.category === "budget") {
+    mapFirst(headers, mapping, ["budget amount", "budget", "plan"], "Amount");
+  }
+
+  if (detected.category === "revenue") {
+    mapFirst(headers, mapping, ["customer", "segment"], "Customer / Segment");
+    mapFirst(headers, mapping, ["revenue type", "product"], "Revenue Type");
+    mapFirst(headers, mapping, ["revenue amount", "revenue", "mrr", "arr"], "Revenue Amount");
+  }
+
+  return mapping;
+}
+
+function transformRows(
+  rows: Record<string, unknown>[],
+  columnMapping: SmartColumnMapping,
+  companyMapping: CompanyMappingContext,
+): SmartUploadTransformedRow[] {
+  return rows.map((row, index) => {
+    const period = normalizePeriod(readMappedValue(row, columnMapping, "Period"));
+    const accountCode = readMappedValue(row, columnMapping, "Account Code");
+    const rawAccountName =
+      readMappedValue(row, columnMapping, "Account Name") ||
+      readMappedValue(row, columnMapping, "Customer / Segment") ||
+      readMappedValue(row, columnMapping, "Employee / Role") ||
+      readMappedValue(row, columnMapping, "KPI Name");
+    const rawCategory =
+      readMappedValue(row, columnMapping, "Raw Category") ||
+      readMappedValue(row, columnMapping, "Revenue Type");
+    const departmentCode = readMappedValue(row, columnMapping, "Department Code");
+    const department = readMappedValue(row, columnMapping, "Department");
+    const amount = parseAmount(
+      readMappedValue(row, columnMapping, "Amount") ||
+        readMappedValue(row, columnMapping, "Revenue Amount") ||
+        readMappedValue(row, columnMapping, "Salary") ||
+        readMappedValue(row, columnMapping, "KPI Value"),
+    );
+    const match = findCompanyAccountMatch({
+      accountCode,
+      accountName: rawAccountName,
+      companyMapping,
+    });
+    const departmentMatch = findCompanyDepartmentMatch({
+      departmentCode,
+      departmentName: department || match.departmentName,
+      companyMapping,
+    });
+    const ruleCategory = applyMappingRules(rawAccountName || accountCode, companyMapping.rules);
+    const suggested = suggestAccountMapping(expandKnownAlias(rawAccountName || accountCode));
+    const category =
+      match.normalizedCategory ||
+      ruleCategory ||
+      suggested.category ||
+      rawCategory ||
+      "";
+    const finalDepartment = departmentMatch.name || match.departmentName || department || suggested.department || "";
+    const mappingStatus: SmartUploadTransformedRow["mappingStatus"] =
+      match.matched || (category && category !== "Uncategorized")
+        ? "Mapped"
+        : rawAccountName || accountCode
+          ? "Suggested"
+          : "Unmapped";
+
+    return {
+      sourceRowNumber: index + 2,
+      period,
+      accountCode,
+      accountName: rawAccountName || accountCode,
+      rawCategory,
+      departmentCode,
+      department: finalDepartment,
+      category,
+      amount,
+      notes: readMappedValue(row, columnMapping, "Notes"),
+      mappingStatus,
+      rawData: row,
+    } satisfies SmartUploadTransformedRow;
+  });
+}
+
+function buildMappingSuggestions(
+  rows: SmartUploadTransformedRow[],
+  companyMapping: CompanyMappingContext,
+) {
+  const byKey = new Map<string, SmartUploadMappingSuggestion>();
+
+  rows.forEach((row) => {
+    const rawValue = row.accountName || row.accountCode;
+    if (!rawValue) return;
+    const key = normalizeAccountName(`${row.accountCode}|${rawValue}|${row.departmentCode}`);
+    if (byKey.has(key)) return;
+
+    const matched = findCompanyAccountMatch({
+      accountCode: row.accountCode,
+      accountName: rawValue,
+      companyMapping,
+    });
+    const departmentMatch = findCompanyDepartmentMatch({
+      departmentCode: row.departmentCode,
+      departmentName: row.department,
+      companyMapping,
+    });
+    const confidence: SmartUploadConfidence = matched.matched
+      ? "High"
+      : row.category && row.category !== "Uncategorized"
+        ? "Medium"
+        : "Low";
+
+    byKey.set(key, {
+      id: key,
+      rawValue,
+      accountCode: row.accountCode,
+      accountName: matched.accountName || row.accountName || expandKnownAlias(rawValue),
+      departmentCode: row.departmentCode,
+      departmentName: departmentMatch.name || row.department,
+      normalizedCategory: matched.normalizedCategory || row.category || "Uncategorized",
+      statementType: "P&L",
+      confidence,
+      reason: matched.matched
+        ? "Matched existing Company Mapping."
+        : "AI/rules suggested this mapping. Please confirm before staging.",
+      action: matched.matched || confidence === "Medium" ? "Confirm" : "Needs Review",
+      matchedExisting: matched.matched,
+    });
+  });
+
+  return [...byKey.values()];
+}
+
+function applySuggestionActions(
+  rows: SmartUploadTransformedRow[],
+  suggestions: SmartUploadMappingSuggestion[],
+): SmartUploadTransformedRow[] {
+  const suggestionsByKey = new Map(suggestions.map((suggestion) => [suggestion.id, suggestion]));
+
+  return rows.map((row) => {
+    const key = normalizeAccountName(`${row.accountCode}|${row.accountName || row.accountCode}|${row.departmentCode}`);
+    const suggestion = suggestionsByKey.get(key);
+
+    if (!suggestion) return row;
+
+    return {
+      ...row,
+      accountCode: suggestion.accountCode,
+      accountName: row.accountName || suggestion.rawValue,
+      departmentCode: suggestion.departmentCode,
+      department: suggestion.departmentName,
+      category: suggestion.normalizedCategory,
+      mappingStatus:
+        suggestion.action === "Ignore"
+          ? "Ignored"
+          : suggestion.action === "Confirm"
+            ? "Mapped"
+            : "Suggested",
+    };
+  });
+}
+
+async function saveConfirmedCompanyMappings(review: SmartUploadReview) {
+  const { user, company } = await getCurrentCompany();
+  if (!user || !company) return;
+  const supabase = createClient();
+
+  for (const suggestion of review.suggestedMappings.filter(
+    (item) => item.action === "Confirm",
+  )) {
+    let departmentId: string | null = null;
+
+    if (suggestion.departmentName) {
+      const { data: department } = await supabase
+        .from("company_departments")
+        .upsert(
+          {
+            user_id: user.id,
+            company_id: company.id,
+            name: suggestion.departmentName,
+            code: suggestion.departmentCode || null,
+            function: suggestion.departmentName,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "company_id,name" },
+        )
+        .select("id")
+        .single();
+
+      departmentId = String(department?.id ?? "");
+    }
+
+    await supabase.from("company_accounts").upsert(
+      {
+        user_id: user.id,
+        company_id: company.id,
+        account_name: suggestion.accountName || suggestion.rawValue,
+        account_code: suggestion.accountCode || null,
+        uploaded_alias: suggestion.rawValue || null,
+        department_id: departmentId || null,
+        normalized_category: suggestion.normalizedCategory || null,
+        statement_type: suggestion.statementType || null,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "company_id,account_name" },
+    );
+
+    if (suggestion.rawValue && suggestion.normalizedCategory) {
+      await saveAccountMapping({
+        rawAccountName: suggestion.rawValue,
+        normalizedCategory: suggestion.normalizedCategory,
+        department: suggestion.departmentName,
+        statementType: suggestion.statementType,
+        status: "Mapped",
+      });
+    }
+
+    if (suggestion.accountCode) {
+      await supabase.from("mapping_rules").upsert(
+        {
+          user_id: user.id,
+          company_id: company.id,
+          rule_type: "account_code_equals",
+          match_value: suggestion.accountCode,
+          normalized_category: suggestion.normalizedCategory || null,
+          priority: 25,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "company_id,rule_type,match_value" },
+      );
+    }
+  }
+}
+
+async function loadCompanyMappingContext(): Promise<CompanyMappingContext> {
+  try {
+    const { company } = await getCurrentCompany();
+    if (!company) return { departments: [], accounts: [], rules: [] };
+    const supabase = createClient();
+    const [departments, accounts, rules] = await Promise.all([
+      supabase.from("company_departments").select("*").eq("company_id", company.id),
+      supabase.from("company_accounts").select("*").eq("company_id", company.id),
+      supabase.from("mapping_rules").select("*").eq("company_id", company.id).eq("is_active", true),
+    ]);
+
+    return {
+      departments: (departments.data ?? []) as CompanyDepartment[],
+      accounts: (accounts.data ?? []) as CompanyAccount[],
+      rules: (rules.data ?? []) as MappingRule[],
+    };
+  } catch {
+    return { departments: [], accounts: [], rules: [] };
+  }
+}
+
+function findCompanyAccountMatch({
+  accountCode,
+  accountName,
+  companyMapping,
+}: {
+  accountCode: string;
+  accountName: string;
+  companyMapping: CompanyMappingContext;
+}) {
+  const normalizedName = normalizeAccountName(accountName);
+  const account = companyMapping.accounts.find(
+    (item) =>
+      (accountCode && item.account_code === accountCode) ||
+      (item.uploaded_alias && normalizeAccountName(item.uploaded_alias) === normalizedName) ||
+      normalizeAccountName(item.account_name) === normalizedName,
+  );
+
+  return {
+    matched: Boolean(account),
+    accountName: account?.account_name ?? "",
+    departmentName:
+      companyMapping.departments.find((department) => department.id === account?.department_id)?.name ?? "",
+    normalizedCategory: account?.normalized_category ?? "",
+  };
+}
+
+function findCompanyDepartmentMatch({
+  departmentCode,
+  departmentName,
+  companyMapping,
+}: {
+  departmentCode: string;
+  departmentName: string;
+  companyMapping: CompanyMappingContext;
+}) {
+  const normalizedName = normalizeAccountName(departmentName);
+  const department = companyMapping.departments.find(
+    (item) =>
+      (departmentCode && item.code === departmentCode) ||
+      normalizeAccountName(item.name) === normalizedName,
+  );
+
+  return { id: department?.id ?? "", name: department?.name ?? expandDepartmentCode(departmentCode) };
+}
+
+function applyMappingRules(rawValue: string, rules: MappingRule[]) {
+  const normalizedRaw = normalizeAccountName(rawValue);
+  const rule = rules
+    .filter((item) => item.is_active !== false)
+    .sort((first, second) => (first.priority ?? 100) - (second.priority ?? 100))
+    .find((item) => {
+      const match = normalizeAccountName(item.match_value);
+      if (item.rule_type.includes("contains")) return normalizedRaw.includes(match);
+      return normalizedRaw === match;
+    });
+
+  return rule?.normalized_category ?? "";
+}
+
+function normalizeAiColumnMapping(
+  aiMapping: Record<string, string>,
+  fallback: SmartColumnMapping,
+  headers: string[],
+) {
+  const mapping = { ...fallback };
+
+  Object.entries(aiMapping).forEach(([source, target]) => {
+    const header = headers.find((item) => normalizeHeader(item) === normalizeHeader(source)) ?? source;
+    const field = standardFields.find((item) => normalizeHeader(item) === normalizeHeader(target));
+    if (header && field) mapping[header] = field;
+  });
+
+  return mapping;
+}
+
+function mergeAiSuggestions(
+  suggestions: SmartUploadMappingSuggestion[],
+  aiSuggestions: Array<Record<string, unknown>>,
+) {
+  const byRaw = new Map(suggestions.map((suggestion) => [normalizeAccountName(suggestion.rawValue), suggestion]));
+
+  aiSuggestions.forEach((item) => {
+    const rawValue = String(item.raw_value ?? "");
+    const existing = byRaw.get(normalizeAccountName(rawValue));
+    if (!existing) return;
+
+    existing.accountCode = String(item.account_code ?? existing.accountCode);
+    existing.accountName = String(item.account_name ?? existing.accountName);
+    existing.departmentCode = String(item.department_code ?? existing.departmentCode);
+    existing.departmentName = String(item.department_name ?? existing.departmentName);
+    existing.normalizedCategory = String(item.normalized_category ?? existing.normalizedCategory);
+    existing.statementType = String(item.statement_type ?? existing.statementType);
+    existing.confidence = normalizeConfidence(String(item.confidence ?? existing.confidence));
+    existing.reason = String(item.reason ?? existing.reason);
+    existing.action = existing.confidence === "Low" ? "Needs Review" : "Confirm";
+  });
+
+  return suggestions;
+}
+
+function buildValidationSummary(
+  review: SmartUploadReview,
+  rows: SmartUploadTransformedRow[],
+): ValidationSummary {
+  const issues = [...review.warnings];
+  const criticalRows = rows.filter(
+    (row) => !row.period || (review.detectedCategory !== "notes" && row.amount === null),
+  ).length;
+  const warningRows = rows.filter(
+    (row) => row.mappingStatus === "Suggested" || row.mappingStatus === "Unmapped",
+  ).length;
+
+  return {
+    totalRows: rows.length,
+    validRows: Math.max(0, rows.length - criticalRows - warningRows),
+    warningRows,
+    errorRows: criticalRows,
+    issues: [
+      ...issues.map((message, index) => ({
+        id: `smart-upload-warning-${index}`,
+        fileCategory: review.detectedCategory === "unknown" ? "actuals" : review.detectedCategory,
+        categoryLabel: categoryTitle(review.detectedCategory),
+        severity: message.toLowerCase().includes("missing") ? "Warning" as const : "Info" as const,
+        message,
+        suggestedFix: "Review the confirmed mapping before approval.",
+      })),
+      ...(criticalRows > 0
+        ? [{
+            id: "smart-upload-critical-rows",
+            fileCategory: review.detectedCategory === "unknown" ? "actuals" : review.detectedCategory,
+            categoryLabel: categoryTitle(review.detectedCategory),
+            severity: "Critical" as const,
+            message: `${criticalRows} row(s) are missing required period or amount values.`,
+            rowCount: criticalRows,
+            suggestedFix: "Complete required column mappings or fix the source file.",
+          }]
+        : []),
+      ...(warningRows > 0
+        ? [{
+            id: "smart-upload-unmapped-rows",
+            fileCategory: review.detectedCategory === "unknown" ? "actuals" : review.detectedCategory,
+            categoryLabel: categoryTitle(review.detectedCategory),
+            severity: "Warning" as const,
+            message: `${warningRows} row(s) still need mapping confirmation.`,
+            rowCount: warningRows,
+            suggestedFix: "Confirm mappings or review them in Company Mapping before approval.",
+          }]
+        : []),
+    ],
+  };
+}
+
+function statusFromReview(
+  review: SmartUploadReview,
+  validationSummary: ValidationSummary,
+): MonthlyCloseStatus {
+  if (review.transformedRows.some((row) => row.mappingStatus === "Suggested" || row.mappingStatus === "Unmapped")) {
+    return "Needs Mapping";
+  }
+  if (validationSummary.errorRows > 0 || validationSummary.warningRows > 0 || review.confidence === "Low") {
+    return "Needs review";
+  }
+  return "Uploaded";
+}
+
+function buildWarnings({
+  detectedCategory,
+  columnMapping,
+  transformedRows,
+  periodCount,
+}: {
+  detectedCategory: ReturnType<typeof detectCategory> | { category: SmartUploadDetectedCategory; confidence: SmartUploadConfidence; reasoning: string };
+  columnMapping: SmartColumnMapping;
+  transformedRows: SmartUploadTransformedRow[];
+  periodCount: number;
+}) {
+  const fields = new Set(Object.values(columnMapping));
+  const warnings: string[] = [];
+
+  if (detectedCategory.category === "unknown") warnings.push("File type needs review before staging.");
+  if (!fields.has("Period")) warnings.push("No clear date/period column detected.");
+  if (!fields.has("Amount") && detectedCategory.category !== "notes") warnings.push("No clear amount/value column detected.");
+  if (
+    ["actuals", "budget"].includes(detectedCategory.category) &&
+    !fields.has("Account Name") &&
+    !fields.has("Account Code")
+  ) {
+    warnings.push("No clear account name or account code column detected.");
+  }
+  if (periodCount > 12) warnings.push("Multiple years detected.");
+  if (periodCount > 1) warnings.push(`${periodCount} reporting periods detected.`);
+  if (transformedRows.some((row) => row.mappingStatus === "Suggested" || row.mappingStatus === "Unmapped")) {
+    warnings.push("Some accounts or departments need confirmation before approval.");
+  }
+
+  return warnings;
+}
+
+function serializeReviewForAi(review: SmartUploadReview) {
+  return {
+    detected_category: categoryTitle(review.detectedCategory),
+    confidence: review.confidence,
+    period_range: {
+      start: review.detectedPeriodStart,
+      end: review.detectedPeriodEnd,
+    },
+    column_mapping: review.columnMapping,
+    suggested_accounts: review.suggestedMappings.slice(0, 30),
+    warnings: review.warnings,
+  };
+}
+
+function readMappedValue(
+  row: Record<string, unknown>,
+  mapping: SmartColumnMapping,
+  field: SmartUploadStandardField,
+) {
+  const source = Object.entries(mapping).find(([, target]) => target === field)?.[0];
+  if (!source) return "";
+  const value = row[source];
+  return typeof value === "string" ? value.trim() : String(value ?? "").trim();
 }
 
 function findHeader(headers: string[], aliases: string[]) {
@@ -232,44 +1189,18 @@ function findHeader(headers: string[], aliases: string[]) {
   );
 }
 
-function detectPeriods(rows: Record<string, unknown>[], periodColumn?: string) {
-  if (!periodColumn) return [];
-
-  return rows
-    .map((row) => normalizePeriod(String(row[periodColumn] ?? "")))
-    .filter((period): period is string => Boolean(period))
-    .sort();
-}
-
-function buildWarnings({
-  headers,
-  rows,
-  mapping,
-  detectedCategory,
-  periodCount,
-}: {
-  headers: string[];
-  rows: Record<string, unknown>[];
-  mapping: SmartColumnMapping;
-  detectedCategory: SmartUploadDetectedCategory;
-  periodCount: number;
-}) {
-  const warnings: string[] = [];
-
-  if (detectedCategory === "unknown") warnings.push("File type needs review before staging.");
-  if (!mapping.period) warnings.push("No clear date/period column detected.");
-  if (!mapping.amount && detectedCategory !== "notes") warnings.push("No clear amount/value column detected.");
-  if (!mapping.account && ["actuals", "budget"].includes(detectedCategory)) warnings.push("No clear account/line-item column detected.");
-  if (periodCount > 12) warnings.push("Multiple years detected.");
-  if (periodCount > 1) warnings.push(`${periodCount} reporting periods detected.`);
-  if (headers.length > 0 && rows.length === 0) warnings.push("Headers were found, but no data rows were detected.");
-
-  return warnings;
+function mapFirst(
+  headers: string[],
+  mapping: SmartColumnMapping,
+  aliases: string[],
+  field: SmartUploadStandardField,
+) {
+  const header = findHeader(headers, aliases);
+  if (header) mapping[header] = field;
 }
 
 function normalizeDetectedCategory(value: string): SmartUploadDetectedCategory {
   const normalized = value.toLowerCase();
-
   if (normalized.includes("actual") || normalized.includes("p&l")) return "actuals";
   if (normalized.includes("budget")) return "budget";
   if (normalized.includes("cash")) return "cash";
@@ -280,20 +1211,63 @@ function normalizeDetectedCategory(value: string): SmartUploadDetectedCategory {
   return "unknown";
 }
 
+function normalizeConfidence(value: string): SmartUploadConfidence {
+  if (value === "High" || value === "Medium" || value === "Low") return value;
+  return "Medium";
+}
+
 function normalizeHeader(value: string) {
-  return value.trim().toLowerCase().replace(/[_-]+/g, " ");
+  return value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
 }
 
 function normalizePeriod(value: string) {
   const trimmed = value.trim();
-  if (!trimmed) return "";
+  if (!trimmed) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
   if (/^\d{4}-\d{2}$/.test(trimmed)) return `${trimmed}-01`;
-
-  const parsed = new Date(`${trimmed} 1`);
-  if (Number.isNaN(parsed.getTime())) return "";
-
+  const monthNameMatch = trimmed.match(
+    /^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*[-\s/]*(\d{4})$/i,
+  );
+  if (monthNameMatch) {
+    return `${monthNameMatch[2]}-${monthNameToNumber(monthNameMatch[1])}-01`;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
   return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function parseAmount(value: string) {
+  if (!value.trim()) return null;
+  const amount = Number(value.replace(/\$/g, "").replace(/,/g, "").replace(/^\((.*)\)$/, "-$1").trim());
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function monthNameToNumber(value: string) {
+  const month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(value.toLowerCase().slice(0, 3));
+  return String(Math.max(0, month) + 1).padStart(2, "0");
+}
+
+function expandKnownAlias(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "aws") return "AWS Hosting";
+  if (normalized === "hub" || normalized === "hubspot") return "HubSpot";
+  if (normalized === "sfdc" || normalized === "salesforce") return "Salesforce";
+  if (normalized === "gusto") return "Gusto Payroll";
+  if (normalized === "stripe") return "Stripe Fees";
+  return value;
+}
+
+function expandDepartmentCode(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "eng") return "Engineering";
+  if (["s&m", "sm", "sales", "mktg"].includes(normalized)) return "Sales & Marketing";
+  if (normalized === "ga" || normalized === "g&a") return "G&A";
+  if (normalized === "cs") return "Customer Success";
+  return value;
+}
+
+function sanitizeFileName(fileName: string) {
+  return fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 function formatPeriodRange(start: string | null, end: string | null) {
