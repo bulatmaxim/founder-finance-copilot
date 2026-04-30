@@ -1,592 +1,820 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { FinanceCopilotPanel } from "@/components/FinanceCopilotPanel";
-import { ReportingSourceNotice } from "@/components/ReportingSourceNotice";
-import { sampleCompany } from "@/data/sampleCompany";
-import { sampleFinancials } from "@/data/sampleFinancials";
+import { useEffect, useMemo, useState } from "react";
+import { Toast, type ToastMessage, type ToastType } from "@/components/Toast";
+import { formatCurrency, formatRunwayMonths } from "@/lib/formatting";
 import {
-  calculateHireCostImpact,
-  calculateHireScenario,
-  estimateCashOutDate,
-} from "@/lib/calculations";
-import {
-  formatCurrency,
-  formatRunwayMonths,
-} from "@/lib/formatting";
-import {
+  getActiveBudgetData,
   getActiveCashData,
   getActiveFinancialData,
   getActualsSourceLabel,
+  getBudgetSourceLabel,
   getCashSourceLabel,
-  type ActiveCashData,
-  type ActiveFinancialData,
+  isApprovedDataSource,
+  type DataSourceMode,
 } from "@/lib/localDataStore";
+import {
+  getSelectedForecastVersionId,
+  loadForecastVersionsForDisplay,
+  type ForecastVersionWithRows,
+} from "@/lib/forecastVersions";
+import { createClient, hasSupabaseBrowserEnv } from "@/lib/supabase/client";
+import { getCurrentCompany } from "@/lib/supabase/data";
 
-type HireForm = {
-  roleTitle: string;
-  department: string;
-  startMonth: string;
-  annualSalary: number;
-  bonusPercent: number;
-  benefitsLoadPercent: number;
-  payrollTaxPercent: number;
-  oneTimeEquipmentCost: number;
-  scenarioName: string;
+type DecisionType =
+  | "Hiring"
+  | "Capital purchase"
+  | "Loan / financing"
+  | "Acquisition"
+  | "Marketing spend"
+  | "Office / lease"
+  | "Pricing change"
+  | "Cost reduction"
+  | "Product launch"
+  | "Market expansion"
+  | "Other";
+
+type DecisionQuestion = {
+  id: string;
+  label: string;
+  question: string;
+  fieldType: "text" | "currency" | "percent" | "number" | "date";
+  required: boolean;
+  placeholder: string;
+  whyItMatters: string;
 };
 
-const latestFinancials = sampleFinancials[sampleFinancials.length - 1];
-const currentRunwayMonths = latestFinancials.runwayMonths;
+type DecisionQuestionResponse = {
+  decisionType: DecisionType;
+  confidence: "High" | "Medium" | "Low";
+  summary: string;
+  questions: DecisionQuestion[];
+};
 
-const startMonths = [
-  "Apr 2026",
-  "May 2026",
-  "Jun 2026",
-  "Jul 2026",
-  "Aug 2026",
-  "Sep 2026",
+type DecisionAnalysis = {
+  recommendation:
+    | "Proceed"
+    | "Proceed with conditions"
+    | "Wait"
+    | "Resize / reduce scope"
+    | "Finance differently"
+    | "Not enough information";
+  cfoSummary: string;
+  financialImpact: {
+    upfrontCost: string;
+    monthlyRecurringImpact: string;
+    runwayImpact: string;
+    cashBalanceImpact: string;
+    ebitdaOperatingExpenseImpact: string;
+    forecastImpact: string;
+    paybackRoi: string;
+  };
+  keyAssumptions: string[];
+  risks: {
+    category: string;
+    severity: "Low" | "Medium" | "High";
+    description: string;
+    mitigation: string;
+  }[];
+  unresolvedQuestions: string[];
+  recommendedNextSteps: string[];
+  scenarios: {
+    name: "Base case" | "Conservative case" | "Aggressive case";
+    summary: string;
+    cashImpact: string;
+    runwayImpact: string;
+    conditions: string;
+  }[];
+  dataWarnings: string[];
+};
+
+const promptExamples = [
+  "Buy new equipment for $250K",
+  "Hire a VP Sales",
+  "Take out a $500K loan",
+  "Increase marketing spend by $40K/month",
+  "Open a new office",
+  "Acquire a small competitor for $1.2M",
+  "Delay hiring for one quarter",
+  "Launch a new product line",
 ];
 
-const initialForm: HireForm = {
-  roleTitle: "Senior Account Executive",
-  department: "Sales & Marketing",
-  startMonth: "Apr 2026",
-  annualSalary: 155000,
-  bonusPercent: 20,
-  benefitsLoadPercent: 18,
-  payrollTaxPercent: 8,
-  oneTimeEquipmentCost: 3500,
-  scenarioName: "Q2 revenue capacity hire",
-};
-
 export default function DecisionCenterPage() {
-  const [draft, setDraft] = useState<HireForm>(initialForm);
-  const [submitted, setSubmitted] = useState<HireForm>(initialForm);
-  const [activeData] = useState<ActiveFinancialData>(() => getActiveFinancialData());
-  const [activeCash] = useState<ActiveCashData>(() => getActiveCashData());
+  const [decisionPrompt, setDecisionPrompt] = useState("");
+  const [questionResponse, setQuestionResponse] =
+    useState<DecisionQuestionResponse | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [analysis, setAnalysis] = useState<DecisionAnalysis | null>(null);
+  const [forecastVersions, setForecastVersions] = useState<ForecastVersionWithRows[]>([]);
+  const [selectedForecastVersionId, setSelectedForecastVersionId] = useState("");
+  const [isLoadingVersions, setIsLoadingVersions] = useState(true);
+  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isSavingMemo, setIsSavingMemo] = useState(false);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
 
-  const latestActiveFinancials =
-    activeData.periods[activeData.periods.length - 1] ?? latestFinancials;
-  const latestCashMetrics = activeCash.periods.at(-1);
-  const baseline = useMemo(
-    () => ({
-      month: latestActiveFinancials.month,
-      cashBalance: latestCashMetrics?.cashBalance ?? latestActiveFinancials.cashBalance,
-      netBurn: latestCashMetrics?.netBurn ?? latestActiveFinancials.netBurn,
-      runwayMonths: latestCashMetrics?.runwayMonths ?? latestActiveFinancials.runwayMonths,
-    }),
-    [latestActiveFinancials, latestCashMetrics],
-  );
-  const analysis = useMemo(
-    () => buildHireAnalysis(submitted, baseline),
-    [baseline, submitted],
-  );
+  const activeData = useMemo(() => getActiveFinancialData(), []);
+  const activeBudget = useMemo(() => getActiveBudgetData(), []);
+  const activeCash = useMemo(() => getActiveCashData(), []);
+  const selectedForecastVersion =
+    forecastVersions.find((version) => version.id === selectedForecastVersionId) ??
+    forecastVersions[0] ??
+    null;
+  const latestFinancialPeriod = activeData.periods.at(-1) ?? null;
+  const latestCashPeriod = activeCash.periods.at(-1) ?? null;
+  const dataWarning = buildDataWarning({
+    actualsSource: activeData.dataSource,
+    budgetSource: activeBudget.dataSource,
+    cashSource: activeCash.dataSource,
+    forecastVersion: selectedForecastVersion,
+  });
+
+  function notify(type: ToastType, title: string, detail?: string) {
+    setToast({ id: Date.now(), type, title, detail });
+  }
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      async function loadVersions() {
+        setIsLoadingVersions(true);
+
+        try {
+          const loaded = await loadForecastVersionsForDisplay();
+          const selectedId = getSelectedForecastVersionId();
+          setForecastVersions(loaded);
+          setSelectedForecastVersionId(
+            selectedId && loaded.some((version) => version.id === selectedId)
+              ? selectedId
+              : loaded[0]?.id ?? "",
+          );
+        } catch (error) {
+          console.error("Decision Center forecast version load failed", error);
+        } finally {
+          setIsLoadingVersions(false);
+        }
+      }
+
+      void loadVersions();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  async function startDecisionAnalysis() {
+    const prompt = decisionPrompt.trim();
+
+    if (!prompt) {
+      notify("warning", "Describe the decision first.");
+      return;
+    }
+
+    setIsGeneratingQuestions(true);
+    setAnalysis(null);
+
+    try {
+      const response = await fetch("/api/ai/decision-questions", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision_prompt: prompt }),
+      });
+      const payload = (await response.json()) as {
+        questions?: DecisionQuestionResponse;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.questions) {
+        throw new Error(payload.error ?? "Decision questions could not be generated.");
+      }
+
+      setQuestionResponse(payload.questions);
+      setAnswers(
+        Object.fromEntries(payload.questions.questions.map((question) => [question.id, ""])),
+      );
+      notify(
+        "success",
+        "Follow-up questions ready.",
+        "Answer what you can; the advisor can proceed with clearly stated assumptions.",
+      );
+    } catch (error) {
+      console.error("Decision questions failed", error);
+      notify(
+        "error",
+        "Follow-up questions could not be generated.",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      setIsGeneratingQuestions(false);
+    }
+  }
+
+  async function analyzeDecision() {
+    if (!questionResponse) {
+      notify("warning", "Start the decision analysis first.");
+      return;
+    }
+
+    setIsAnalyzing(true);
+
+    try {
+      const response = await fetch("/api/ai/decision-analysis", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision_prompt: decisionPrompt,
+          decision_type: questionResponse.decisionType,
+          questions: questionResponse.questions,
+          answers,
+          forecast_version_id: selectedForecastVersion?.id,
+        }),
+      });
+      const payload = (await response.json()) as {
+        analysis?: DecisionAnalysis;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.analysis) {
+        throw new Error(payload.error ?? "Decision analysis failed.");
+      }
+
+      setAnalysis(payload.analysis);
+      notify(
+        "success",
+        "Decision analysis complete.",
+        "Review the recommendation, risks, and scenarios before taking action.",
+      );
+    } catch (error) {
+      console.error("Decision analysis failed", error);
+      notify(
+        "error",
+        "Decision analysis could not be completed.",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function saveDecisionMemo() {
+    if (!analysis || !questionResponse) {
+      notify("warning", "Analyze the decision before saving a memo.");
+      return;
+    }
+
+    if (!hasSupabaseBrowserEnv()) {
+      notify("error", "Supabase is not configured.");
+      return;
+    }
+
+    setIsSavingMemo(true);
+
+    try {
+      const { user, company } = await getCurrentCompany();
+
+      if (!user || !company) {
+        throw new Error("Log in and complete a company profile before saving a memo.");
+      }
+
+      const supabase = createClient();
+      const { error } = await supabase.from("decision_memos").insert({
+        user_id: user.id,
+        company_id: company.id,
+        title: decisionPrompt.slice(0, 120),
+        decision_type: questionResponse.decisionType,
+        decision_prompt: decisionPrompt,
+        questions: questionResponse.questions,
+        answers,
+        analysis,
+        recommendation: analysis.recommendation,
+        status: "Draft",
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      notify("success", "Decision memo saved.", "Saved as a Draft decision memo.");
+    } catch (error) {
+      console.error("Decision memo save failed", error);
+      notify(
+        "error",
+        "Decision memo could not be saved.",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      setIsSavingMemo(false);
+    }
+  }
+
+  async function copySummary() {
+    if (!analysis) {
+      notify("warning", "Analyze the decision before copying a summary.");
+      return;
+    }
+
+    const text = [
+      `Decision: ${decisionPrompt}`,
+      `Recommendation: ${analysis.recommendation}`,
+      "",
+      analysis.cfoSummary,
+      "",
+      "Next steps:",
+      ...analysis.recommendedNextSteps.map((step) => `- ${step}`),
+    ].join("\n");
+
+    await navigator.clipboard.writeText(text);
+    notify("success", "Summary copied.");
+  }
 
   return (
     <section className="space-y-8">
-      <div>
-        <p className="text-sm font-medium uppercase tracking-[0.12em] text-neutral-500">
-          Decision Center
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-          Can we afford this hire?
-        </h1>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
-          Local decision-support workflow for {sampleCompany.name}. This model
-          estimates how one hire changes burn, runway, and cash-out timing using
-          the active finance data source.
-        </p>
-        <div className="mt-4 flex flex-wrap gap-3">
-          <DataSourceBadge label={getActualsSourceLabel(activeData.dataSource)} />
-          <DataSourceBadge label={getCashSourceLabel(activeCash.dataSource)} />
-        </div>
-      </div>
+      <Toast message={toast} onClose={() => setToast(null)} />
 
-      <ReportingSourceNotice
-        reportingMonth={latestActiveFinancials.month}
-        sources={[activeData.dataSource, activeCash.dataSource]}
-      />
-
-      <div className="grid gap-6 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
-        <HireInputForm
-          form={draft}
-          onChange={setDraft}
-          onSubmit={() => setSubmitted(draft)}
-        />
-
-        <section className="rounded-md border border-neutral-200 bg-white p-5">
-          <h2 className="text-base font-semibold">Current Baseline</h2>
-          <p className="mt-1 text-sm text-neutral-500">
-            Latest month: {latestActiveFinancials.month}
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <p className="text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
+            Decision Center
           </p>
-
-          <div className="mt-5 grid gap-4 sm:grid-cols-3">
-            <BaselineMetric
-              label="Cash balance"
-              value={formatCurrency(latestCashMetrics?.cashBalance ?? latestActiveFinancials.cashBalance)}
-            />
-            <BaselineMetric
-              label="Net burn"
-              value={formatCurrency(latestCashMetrics?.netBurn ?? latestActiveFinancials.netBurn)}
-            />
-            <BaselineMetric
-              label="Runway"
-              value={formatRunwayMonths(latestCashMetrics?.runwayMonths ?? latestActiveFinancials.runwayMonths)}
-            />
-          </div>
-
-          <div className="mt-6 rounded-md border border-neutral-200 p-4">
-            <p className="text-sm font-medium text-neutral-900">
-              Plain-English Recommendation
-            </p>
-            <p className="mt-2 text-sm leading-6 text-neutral-700">
-              {analysis.recommendation}
-            </p>
-          </div>
-        </section>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+            Decision Center
+          </h1>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
+            Analyze major business decisions with AI using your company&apos;s
+            cash, forecast, budget, and operating data.
+          </p>
+        </div>
+        <p className="max-w-md text-sm leading-6 text-[var(--text-muted)]">
+          This analysis is decision-support only and should be reviewed by
+          management before action.
+        </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <SummaryCard
-          label="Current runway"
-          value={formatRunwayMonths(baseline.runwayMonths)}
-        />
-        <SummaryCard
-          label="New runway"
-          value={formatRunwayMonths(analysis.baseScenario.runwayMonths)}
-        />
-        <SummaryCard
-          label="Runway impact"
-          value={formatMonthChange(analysis.baseScenario.runwayChangeMonths)}
-        />
-        <SummaryCard
-          label="Monthly cost impact"
-          value={formatCurrency(analysis.costImpact.totalMonthlyCostImpact)}
-        />
-        <SummaryCard
-          label="First-year cash impact"
-          value={formatCurrency(analysis.costImpact.firstYearCashImpact)}
-        />
-      </div>
-
-      <section className="rounded-md border border-neutral-200 bg-white p-5">
-        <h2 className="text-base font-semibold">Cost Build</h2>
-        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <BaselineMetric
-            label="Monthly salary"
-            value={formatCurrency(analysis.costImpact.monthlySalaryCost)}
+      <section className="premium-card overflow-hidden">
+        <div className="premium-panel-header p-5">
+          <p className="premium-pill inline-flex">AI Decision Advisor</p>
+          <h2 className="mt-3 text-xl font-semibold">What decision are you considering?</h2>
+        </div>
+        <div className="space-y-4 p-5">
+          <textarea
+            value={decisionPrompt}
+            onChange={(event) => setDecisionPrompt(event.target.value)}
+            placeholder={promptExamples.join("\n")}
+            className="min-h-40 w-full rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] px-4 py-4 text-sm leading-6 text-[var(--foreground)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
           />
-          <BaselineMetric
-            label="Monthly bonus"
-            value={formatCurrency(analysis.costImpact.monthlyBonusCost)}
-          />
-          <BaselineMetric
-            label="Benefits load"
-            value={formatCurrency(analysis.costImpact.monthlyBenefitsCost)}
-          />
-          <BaselineMetric
-            label="Payroll tax"
-            value={formatCurrency(analysis.costImpact.monthlyPayrollTaxCost)}
-          />
-          <BaselineMetric
-            label="Equipment"
-            value={formatCurrency(submitted.oneTimeEquipmentCost)}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={isGeneratingQuestions}
+              onClick={() => void startDecisionAnalysis()}
+              className="h-10 rounded-md bg-[var(--foreground)] px-4 text-sm font-medium text-[var(--background)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isGeneratingQuestions ? "Preparing..." : "Start Decision Analysis"}
+            </button>
+            {promptExamples.slice(0, 4).map((example) => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => setDecisionPrompt(example)}
+                className="rounded-md border border-[var(--line-soft)] px-3 py-2 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--foreground)]"
+              >
+                {example}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
-      <ScenarioTable scenarios={analysis.scenarios} />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <QuestionPanel
+          questionResponse={questionResponse}
+          answers={answers}
+          isAnalyzing={isAnalyzing}
+          onAnswer={(id, value) => setAnswers((current) => ({ ...current, [id]: value }))}
+          onAnalyze={() => void analyzeDecision()}
+        />
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <section className="rounded-md border border-neutral-200 bg-white p-5">
-          <h2 className="text-base font-semibold">Founder Takeaway</h2>
-          <p className="mt-4 text-sm leading-6 text-neutral-700">
-            {analysis.founderTakeaway}
-          </p>
-          <p className="mt-4 text-sm leading-6 text-neutral-700">
-            Estimated new cash-out date in the base case:{" "}
-            <span className="font-medium text-neutral-950">
-              {analysis.estimatedCashOutDate}
-            </span>
-            .
-          </p>
-        </section>
-
-        <section className="rounded-md border border-neutral-200 bg-white p-5">
-          <h2 className="text-base font-semibold">Suggested Actions</h2>
-          <ol className="mt-4 space-y-3 text-sm leading-6 text-neutral-700">
-            {analysis.suggestedActions.map((action) => (
-              <li key={action} className="ml-4 list-decimal">
-                {action}
-              </li>
-            ))}
-          </ol>
-        </section>
+        <ContextPanel
+          isLoadingVersions={isLoadingVersions}
+          forecastVersions={forecastVersions}
+          selectedForecastVersionId={selectedForecastVersionId}
+          selectedForecastVersion={selectedForecastVersion}
+          actualsSource={activeData.dataSource}
+          budgetSource={activeBudget.dataSource}
+          cashSource={activeCash.dataSource}
+          latestFinancialPeriod={latestFinancialPeriod}
+          latestCashPeriod={latestCashPeriod}
+          dataWarning={dataWarning}
+          onSelectForecast={setSelectedForecastVersionId}
+        />
       </div>
 
-      <FinanceCopilotPanel
-        reportingMonth={baseline.month}
-        mode="dashboard"
-        showAsk
-      />
+      {dataWarning ? (
+        <div className="premium-notice">
+          Some company data is missing or unapproved. This decision analysis may be incomplete.
+        </div>
+      ) : null}
+
+      {analysis ? (
+        <AnalysisPanel
+          analysis={analysis}
+          isSavingMemo={isSavingMemo}
+          onSaveMemo={() => void saveDecisionMemo()}
+          onCopySummary={() => void copySummary()}
+        />
+      ) : (
+        <section className="premium-card p-6">
+          <h2 className="text-base font-semibold">Decision analysis output</h2>
+          <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
+            Enter a decision, answer the follow-up questions, then run the
+            analysis. The output will include a recommendation, financial
+            impact, scenarios, risks, unresolved questions, and next steps.
+          </p>
+        </section>
+      )}
     </section>
   );
 }
 
-function DataSourceBadge({ label }: { label: string }) {
-  return (
-    <span className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700">
-      {label}
-    </span>
-  );
-}
-
-function HireInputForm({
-  form,
-  onChange,
-  onSubmit,
+function QuestionPanel({
+  questionResponse,
+  answers,
+  isAnalyzing,
+  onAnswer,
+  onAnalyze,
 }: {
-  form: HireForm;
-  onChange: (form: HireForm) => void;
-  onSubmit: () => void;
+  questionResponse: DecisionQuestionResponse | null;
+  answers: Record<string, string>;
+  isAnalyzing: boolean;
+  onAnswer: (id: string, value: string) => void;
+  onAnalyze: () => void;
 }) {
-  function updateField<K extends keyof HireForm>(key: K, value: HireForm[K]) {
-    onChange({ ...form, [key]: value });
+  if (!questionResponse) {
+    return (
+      <section className="premium-card p-6">
+        <h2 className="text-base font-semibold">AI follow-up questions</h2>
+        <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
+          The advisor will classify the decision and ask targeted questions
+          after you start the analysis.
+        </p>
+      </section>
+    );
   }
 
   return (
-    <section className="rounded-md border border-neutral-200 bg-white p-5">
-      <div>
-        <h2 className="text-base font-semibold">Hire Assumptions</h2>
-        <p className="mt-1 text-sm text-neutral-500">
-          Enter the role economics and generate an updated runway view.
+    <section className="premium-card overflow-hidden">
+      <div className="premium-panel-header p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <SourceBadge label={questionResponse.decisionType} />
+          <SourceBadge label={`${questionResponse.confidence} classification confidence`} />
+        </div>
+        <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
+          {questionResponse.summary}
         </p>
       </div>
-
-      <div className="mt-5 grid gap-4">
-        <TextField
-          label="Hiring scenario name"
-          value={form.scenarioName}
-          onChange={(value) => updateField("scenarioName", value)}
-        />
-        <TextField
-          label="Role title"
-          value={form.roleTitle}
-          onChange={(value) => updateField("roleTitle", value)}
-        />
-
-        <label className="flex flex-col gap-1 text-sm font-medium text-neutral-700">
-          Department
-          <select
-            value={form.department}
-            onChange={(event) => updateField("department", event.target.value)}
-            className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-950"
-          >
-            <option>Sales & Marketing</option>
-            <option>Research & Development</option>
-            <option>General & Administrative</option>
-          </select>
-        </label>
-
-        <label className="flex flex-col gap-1 text-sm font-medium text-neutral-700">
-          Start month
-          <select
-            value={form.startMonth}
-            onChange={(event) => updateField("startMonth", event.target.value)}
-            className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-950"
-          >
-            {startMonths.map((month) => (
-              <option key={month}>{month}</option>
-            ))}
-          </select>
-        </label>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <NumberField
-            label="Annual salary"
-            value={form.annualSalary}
-            onChange={(value) => updateField("annualSalary", value)}
-          />
-          <NumberField
-            label="Bonus %"
-            value={form.bonusPercent}
-            onChange={(value) => updateField("bonusPercent", value)}
-          />
-          <NumberField
-            label="Benefits load %"
-            value={form.benefitsLoadPercent}
-            onChange={(value) => updateField("benefitsLoadPercent", value)}
-          />
-          <NumberField
-            label="Payroll tax %"
-            value={form.payrollTaxPercent}
-            onChange={(value) => updateField("payrollTaxPercent", value)}
-          />
-        </div>
-
-        <NumberField
-          label="One-time equipment cost"
-          value={form.oneTimeEquipmentCost}
-          onChange={(value) => updateField("oneTimeEquipmentCost", value)}
-        />
-
+      <div className="grid gap-4 p-5 lg:grid-cols-2">
+        {questionResponse.questions.map((question) => (
+          <label key={question.id} className="text-sm font-medium text-[var(--foreground)]">
+            {question.label}
+            <input
+              value={answers[question.id] ?? ""}
+              placeholder={question.placeholder}
+              type={question.fieldType === "date" ? "date" : "text"}
+              inputMode={inputModeForQuestion(question.fieldType)}
+              onChange={(event) => onAnswer(question.id, event.target.value)}
+              className="mt-2 h-10 w-full rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] px-3 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
+            />
+            <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">
+              {question.question} {question.required ? "Required input." : "Optional if unknown."}
+            </span>
+            <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">
+              Why it matters: {question.whyItMatters}
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="border-t border-[var(--line-soft)] p-5">
         <button
           type="button"
-          onClick={onSubmit}
-          className="mt-2 h-10 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white hover:bg-neutral-800"
+          disabled={isAnalyzing}
+          onClick={onAnalyze}
+          className="h-10 rounded-md bg-[var(--foreground)] px-4 text-sm font-medium text-[var(--background)] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Run Hire Analysis
+          {isAnalyzing ? "Analyzing..." : "Analyze Decision"}
         </button>
       </div>
     </section>
   );
 }
 
-function ScenarioTable({
-  scenarios,
+function ContextPanel({
+  isLoadingVersions,
+  forecastVersions,
+  selectedForecastVersionId,
+  selectedForecastVersion,
+  actualsSource,
+  budgetSource,
+  cashSource,
+  latestFinancialPeriod,
+  latestCashPeriod,
+  dataWarning,
+  onSelectForecast,
 }: {
-  scenarios: ReturnType<typeof buildHireAnalysis>["scenarios"];
+  isLoadingVersions: boolean;
+  forecastVersions: ForecastVersionWithRows[];
+  selectedForecastVersionId: string;
+  selectedForecastVersion: ForecastVersionWithRows | null;
+  actualsSource: DataSourceMode;
+  budgetSource: DataSourceMode;
+  cashSource: DataSourceMode;
+  latestFinancialPeriod: ReturnType<typeof getActiveFinancialData>["periods"][number] | null;
+  latestCashPeriod: ReturnType<typeof getActiveCashData>["periods"][number] | null;
+  dataWarning: string;
+  onSelectForecast: (id: string) => void;
 }) {
   return (
-    <section className="overflow-hidden rounded-md border border-neutral-200 bg-white">
-      <div className="border-b border-neutral-200 px-5 py-4">
-        <h2 className="text-base font-semibold">Scenario Comparison</h2>
-        <p className="mt-1 text-sm text-neutral-500">
-          Best, base, and worst cases show how the hire changes monthly burn and
-          runway.
-        </p>
+    <aside className="premium-card p-5">
+      <h2 className="text-base font-semibold">Decision context</h2>
+      <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
+        The advisor uses these sources when available.
+      </p>
+
+      <div className="mt-5 space-y-3">
+        <SourceBadge label={getActualsSourceLabel(actualsSource)} />
+        <SourceBadge label={getBudgetSourceLabel(budgetSource)} />
+        <SourceBadge label={getCashSourceLabel(cashSource)} />
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[780px] text-left text-sm">
-          <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-600">
-            <tr>
-              <th className="px-4 py-3 font-medium">Scenario</th>
-              <th className="px-4 py-3 font-medium">Monthly burn impact</th>
-              <th className="px-4 py-3 font-medium">Runway months</th>
-              <th className="px-4 py-3 font-medium">Runway change</th>
-              <th className="px-4 py-3 font-medium">Recommendation level</th>
-            </tr>
-          </thead>
-          <tbody>
-            {scenarios.map((scenario) => (
-              <tr key={scenario.name} className="border-b border-neutral-100">
-                <td className="px-4 py-3 font-medium">{scenario.name}</td>
-                <td className="px-4 py-3">
-                  {formatCurrency(scenario.monthlyBurnImpact)}
-                </td>
-                <td className="px-4 py-3">
-                  {formatRunwayMonths(scenario.runwayMonths)}
-                </td>
-                <td className="px-4 py-3">
-                  {formatMonthChange(scenario.runwayChangeMonths)}
-                </td>
-                <td className="px-4 py-3">
-                  <span className="rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
-                    {scenario.recommendationLevel}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <label className="mt-5 block text-sm font-medium text-[var(--foreground)]">
+        Forecast version
+        <select
+          value={selectedForecastVersionId}
+          disabled={isLoadingVersions || forecastVersions.length === 0}
+          onChange={(event) => onSelectForecast(event.target.value)}
+          className="mt-2 h-10 w-full rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] px-3 text-sm text-[var(--foreground)] outline-none"
+        >
+          {forecastVersions.length === 0 ? (
+            <option value="">No forecast version</option>
+          ) : (
+            forecastVersions.map((version) => (
+              <option key={version.id} value={version.id}>
+                {version.name}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+
+      <div className="mt-5 grid gap-3">
+        <ContextMetric
+          label="Cash balance"
+          value={formatCurrency(
+            latestCashPeriod?.cashBalance ?? latestFinancialPeriod?.cashBalance ?? 0,
+          )}
+        />
+        <ContextMetric
+          label="Net burn"
+          value={formatCurrency(
+            latestCashPeriod?.netBurn ?? latestFinancialPeriod?.netBurn ?? 0,
+          )}
+        />
+        <ContextMetric
+          label="Runway"
+          value={formatRunwayMonths(
+            latestCashPeriod?.runwayMonths ?? latestFinancialPeriod?.runwayMonths ?? 0,
+          )}
+        />
+        <ContextMetric
+          label="Forecast"
+          value={selectedForecastVersion?.name ?? "No saved forecast"}
+          detail={
+            selectedForecastVersion
+              ? `${selectedForecastVersion.actualMonths} actual, ${selectedForecastVersion.preliminaryMonths} preliminary`
+              : undefined
+          }
+        />
+      </div>
+
+      {dataWarning ? (
+        <p className="mt-4 rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] p-3 text-sm leading-6 text-[var(--text-muted)]">
+          {dataWarning}
+        </p>
+      ) : null}
+    </aside>
+  );
+}
+
+function AnalysisPanel({
+  analysis,
+  isSavingMemo,
+  onSaveMemo,
+  onCopySummary,
+}: {
+  analysis: DecisionAnalysis;
+  isSavingMemo: boolean;
+  onSaveMemo: () => void;
+  onCopySummary: () => void;
+}) {
+  return (
+    <section className="premium-card overflow-hidden">
+      <div className="premium-panel-header flex flex-col gap-4 p-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="premium-pill inline-flex">Decision Analysis</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <h2 className="text-2xl font-semibold tracking-tight">
+              {analysis.recommendation}
+            </h2>
+            <RecommendationBadge recommendation={analysis.recommendation} />
+          </div>
+          <p className="mt-3 max-w-4xl text-sm leading-6 text-[var(--text-muted)]">
+            {analysis.cfoSummary}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onCopySummary}
+            className="h-10 rounded-md border border-[var(--line-soft)] px-4 text-sm font-medium"
+          >
+            Copy Summary
+          </button>
+          <button
+            type="button"
+            disabled={isSavingMemo}
+            onClick={onSaveMemo}
+            className="h-10 rounded-md bg-[var(--foreground)] px-4 text-sm font-medium text-[var(--background)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSavingMemo ? "Saving..." : "Save Decision Memo"}
+          </button>
+        </div>
+      </div>
+
+      {analysis.dataWarnings.length > 0 ? (
+        <div className="mx-5 mt-5 premium-notice">
+          {analysis.dataWarnings.join(" ")}
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 p-5 lg:grid-cols-2 xl:grid-cols-3">
+        {Object.entries(analysis.financialImpact).map(([key, value]) => (
+          <ContextMetric key={key} label={labelize(key)} value={value} />
+        ))}
+      </div>
+
+      <div className="grid gap-6 p-5 xl:grid-cols-2">
+        <ListPanel title="Key Assumptions" items={analysis.keyAssumptions} />
+        <ListPanel title="Questions Still Unresolved" items={analysis.unresolvedQuestions} />
+        <RiskPanel risks={analysis.risks} />
+        <ListPanel title="Recommended Next Steps" items={analysis.recommendedNextSteps} />
+      </div>
+
+      <div className="border-t border-[var(--line-soft)] p-5">
+        <h3 className="text-base font-semibold">Scenario View</h3>
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          {analysis.scenarios.map((scenario) => (
+            <article key={scenario.name} className="rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] p-4">
+              <h4 className="text-sm font-semibold">{scenario.name}</h4>
+              <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
+                {scenario.summary}
+              </p>
+              <div className="mt-3 space-y-2 text-sm">
+                <p><strong>Cash:</strong> {scenario.cashImpact}</p>
+                <p><strong>Runway:</strong> {scenario.runwayImpact}</p>
+                <p><strong>Conditions:</strong> {scenario.conditions}</p>
+              </div>
+            </article>
+          ))}
+        </div>
       </div>
     </section>
   );
 }
 
-function buildHireAnalysis(
-  form: HireForm,
-  baseline = {
-    month: latestFinancials.month,
-    cashBalance: latestFinancials.cashBalance,
-    netBurn: latestFinancials.netBurn,
-    runwayMonths: currentRunwayMonths,
-  },
-) {
-  const costImpact = calculateHireCostImpact({
-    annualSalary: form.annualSalary,
-    bonusPercent: form.bonusPercent,
-    benefitsLoadPercent: form.benefitsLoadPercent,
-    payrollTaxPercent: form.payrollTaxPercent,
-    oneTimeEquipmentCost: form.oneTimeEquipmentCost,
-  });
-
-  const currentScenario = calculateHireScenario({
-    name: "Current case",
-    currentCashBalance: baseline.cashBalance,
-    currentNetBurn: baseline.netBurn,
-    currentRunwayMonths: baseline.runwayMonths,
-    monthlyBurnImpact: 0,
-  });
-  const bestScenario = calculateHireScenario({
-    name: "Best case",
-    currentCashBalance: baseline.cashBalance,
-    currentNetBurn: baseline.netBurn,
-    currentRunwayMonths: baseline.runwayMonths,
-    monthlyBurnImpact: costImpact.totalMonthlyCostImpact * 0.75,
-  });
-  const baseScenario = calculateHireScenario({
-    name: "Base case",
-    currentCashBalance: baseline.cashBalance,
-    currentNetBurn: baseline.netBurn,
-    currentRunwayMonths: baseline.runwayMonths,
-    monthlyBurnImpact: costImpact.totalMonthlyCostImpact,
-  });
-  const worstScenario = calculateHireScenario({
-    name: "Worst case",
-    currentCashBalance: baseline.cashBalance,
-    currentNetBurn: baseline.netBurn,
-    currentRunwayMonths: baseline.runwayMonths,
-    monthlyBurnImpact: costImpact.totalMonthlyCostImpact * 1.15,
-  });
-
-  const recommendation = getRecommendation(baseScenario.runwayMonths, form);
-  const estimatedCashOutDate = estimateCashOutDate(
-    baseline.month,
-    baseScenario.runwayMonths,
+function RiskPanel({ risks }: { risks: DecisionAnalysis["risks"] }) {
+  return (
+    <section className="rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] p-4">
+      <h3 className="text-base font-semibold">Risks</h3>
+      <div className="mt-3 space-y-3">
+        {risks.map((risk) => (
+          <article key={`${risk.category}-${risk.description}`} className="rounded-md border border-[var(--line-soft)] p-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold">{risk.category}</p>
+              <SourceBadge label={`${risk.severity} risk`} />
+            </div>
+            <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
+              {risk.description}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
+              Mitigation: {risk.mitigation}
+            </p>
+          </article>
+        ))}
+      </div>
+    </section>
   );
-
-  return {
-    costImpact,
-    currentScenario,
-    bestScenario,
-    baseScenario,
-    worstScenario,
-    scenarios: [currentScenario, bestScenario, baseScenario, worstScenario],
-    recommendation,
-    founderTakeaway: getFounderTakeaway(
-      form,
-      baseScenario.runwayMonths,
-      baseScenario.runwayChangeMonths,
-      costImpact.totalMonthlyCostImpact,
-      baseline.runwayMonths,
-    ),
-    suggestedActions: getSuggestedActions(baseScenario.runwayMonths),
-    estimatedCashOutDate,
-  };
 }
 
-function TextField({
+function ListPanel({ title, items }: { title: string; items: string[] }) {
+  return (
+    <section className="rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] p-4">
+      <h3 className="text-base font-semibold">{title}</h3>
+      <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--text-muted)]">
+        {items.length > 0 ? (
+          items.map((item) => (
+            <li key={item} className="ml-4 list-disc">
+              {item}
+            </li>
+          ))
+        ) : (
+          <li>No items returned.</li>
+        )}
+      </ul>
+    </section>
+  );
+}
+
+function ContextMetric({
   label,
   value,
-  onChange,
+  detail,
 }: {
   label: string;
   value: string;
-  onChange: (value: string) => void;
+  detail?: string;
 }) {
   return (
-    <label className="flex flex-col gap-1 text-sm font-medium text-neutral-700">
-      {label}
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-950"
-      />
-    </label>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-sm font-medium text-neutral-700">
-      {label}
-      <input
-        type="number"
-        min="0"
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-950"
-      />
-    </label>
-  );
-}
-
-function SummaryCard({ label, value }: { label: string; value: string }) {
-  return (
-    <article className="rounded-md border border-neutral-200 bg-white p-5">
-      <p className="text-sm font-medium text-neutral-500">{label}</p>
-      <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
+    <article className="rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+        {label}
+      </p>
+      <p className="mt-2 text-lg font-semibold">{value}</p>
+      {detail ? <p className="mt-1 text-xs text-[var(--text-muted)]">{detail}</p> : null}
     </article>
   );
 }
 
-function BaselineMetric({ label, value }: { label: string; value: string }) {
+function SourceBadge({ label }: { label: string }) {
   return (
-    <div className="rounded-md border border-neutral-200 p-4">
-      <p className="text-sm font-medium text-neutral-500">{label}</p>
-      <p className="mt-2 text-lg font-semibold tracking-tight">{value}</p>
-    </div>
+    <span className="premium-pill rounded-xl px-3 py-2 text-xs font-medium">
+      {label}
+    </span>
   );
 }
 
-function getRecommendation(runwayMonths: number, form: HireForm) {
-  if (runwayMonths > 12) {
-    return `The ${form.roleTitle} hire appears affordable based on current cash and burn. The base case keeps runway above 12 months, but the forecast should still be updated before approval.`;
-  }
-
-  if (runwayMonths >= 9) {
-    return `The ${form.roleTitle} hire may be affordable, but management should monitor burn and revenue closely. The decision leaves less cushion, so approval should be paired with forecast updates and monthly spend review.`;
-  }
-
-  return `The ${form.roleTitle} hire creates runway pressure and should likely be delayed, reduced, or paired with cost offsets before approval.`;
+function RecommendationBadge({ recommendation }: { recommendation: string }) {
+  return (
+    <span className="rounded-md border border-[var(--line-soft)] bg-[var(--surface-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+      {recommendation}
+    </span>
+  );
 }
 
-function getFounderTakeaway(
-  form: HireForm,
-  newRunway: number,
-  runwayChange: number,
-  monthlyCostImpact: number,
-  baselineRunwayMonths: number,
-) {
-  return `${form.scenarioName} adds ${formatCurrency(monthlyCostImpact)} of monthly burn beginning in ${form.startMonth}. In the base case, runway moves from ${formatRunwayMonths(baselineRunwayMonths)} to ${formatRunwayMonths(newRunway)}, a change of ${formatMonthChange(runwayChange)}. This is a financeable decision only if the role has a clear link to revenue, product delivery, or operating leverage.`;
+function inputModeForQuestion(fieldType: DecisionQuestion["fieldType"]) {
+  if (fieldType === "currency" || fieldType === "number" || fieldType === "percent") {
+    return "decimal";
+  }
+
+  return "text";
 }
 
-function getSuggestedActions(runwayMonths: number) {
-  if (runwayMonths < 9) {
-    return [
-      "Delay the hire by 60 days while reviewing cash runway.",
-      "Hire a contractor first to reduce fixed monthly burn.",
-      "Offset the hire with expense reductions before approving the role.",
-      "Review revenue assumptions and update the latest forecast.",
-      "Prepare investor update language if runway falls below target.",
-    ];
+function buildDataWarning({
+  actualsSource,
+  budgetSource,
+  cashSource,
+  forecastVersion,
+}: {
+  actualsSource: DataSourceMode;
+  budgetSource: DataSourceMode;
+  cashSource: DataSourceMode;
+  forecastVersion: ForecastVersionWithRows | null;
+}) {
+  const warnings: string[] = [];
+
+  if (!isApprovedDataSource(actualsSource)) {
+    warnings.push("actuals are not approved");
   }
 
-  if (runwayMonths <= 12) {
-    return [
-      "Proceed only after updating the forecast with the new hire cost.",
-      "Review revenue assumptions tied to the role.",
-      "Identify discretionary spend that could offset part of the hire.",
-      "Monitor net burn monthly against the revised forecast.",
-      "Prepare investor update language around runway and hiring discipline.",
-    ];
+  if (budgetSource === "sample") {
+    warnings.push("budget data may be demo/sample");
   }
 
-  return [
-    "Proceed, but update the forecast before the offer is finalized.",
-    "Define success metrics for the role before approval.",
-    "Review revenue assumptions tied to the hire.",
-    "Monitor monthly burn after the start date.",
-    "Confirm the hire fits the current operating plan.",
-  ];
+  if (cashSource === "sample") {
+    warnings.push("cash/runway data may be demo/sample");
+  }
+
+  if (!forecastVersion) {
+    warnings.push("no saved forecast version is selected");
+  } else if (forecastVersion.preliminaryMonths > 0) {
+    warnings.push("selected forecast includes preliminary months");
+  }
+
+  return warnings.length > 0
+    ? `Context warning: ${warnings.join(", ")}.`
+    : "";
 }
 
-function formatMonthChange(value: number) {
-  const rounded = Math.abs(value).toFixed(1);
-
-  if (value === 0) {
-    return "0.0 months";
-  }
-
-  return value > 0 ? `+${rounded} months` : `-${rounded} months`;
+function labelize(value: string) {
+  return value
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (letter) => letter.toUpperCase());
 }
